@@ -73,20 +73,27 @@ fn update_overlay(
 
 /// Scripted run for headless verification. Driven by simulation ticks (not
 /// frames) so the result is identical whether the renderer runs at 8 fps on a
-/// CPU or 240 fps on a GPU: walk right for ~0.6 s, stop, screenshot, quit.
+/// CPU or 240 fps on a GPU. Walk right to the first dummy, swing at it, and
+/// screenshot during the hit freeze. Virtual time is slowed so the short-lived
+/// slash box is visible in a frame even on the CPU renderer.
 fn smoke_script(
     mut commands: Commands,
     tick: Res<SimTick>,
     mut input: ResMut<InputState>,
+    mut vtime: ResMut<Time<Virtual>>,
     mut exit: MessageWriter<AppExit>,
     mut frames: Local<u32>,
     mut shot_frame: Local<Option<u32>>,
 ) {
     *frames += 1;
+    if *frames == 1 {
+        vtime.set_relative_speed(0.12);
+    }
     let t = tick.0;
-    input.set(Action::Right, (30..100).contains(&t), t + 1);
+    input.set(Action::Right, (30..62).contains(&t), t + 1);
+    input.set(Action::Attack, (92..94).contains(&t), t + 1);
 
-    if t >= 160 && shot_frame.is_none() {
+    if t >= 100 && shot_frame.is_none() {
         std::fs::create_dir_all("out").ok();
         commands
             .spawn(Screenshot::primary_window())
@@ -99,7 +106,7 @@ fn smoke_script(
             exit.write(AppExit::Success);
         }
         // Never hang forever if ticks stop advancing.
-        None if *frames > 5000 => {
+        None if *frames > 4000 => {
             exit.write(AppExit::error());
         }
         _ => {}

@@ -1,170 +1,180 @@
-//! M0 greybox: a lit 2.5D test room. Gameplay sits on z = 0; background
-//! slabs at real depths give true parallax from the perspective camera.
-//! The camera rig proper arrives in M4.
+//! Stage dressing shared by every scene: lights, camera, parallax backdrop and
+//! the material palette. Gameplay lives on z = 0; the backdrop sits at real
+//! depths so the perspective camera gives true parallax.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::render::view::Hdr;
-use hk_sim::components::{PrevPos, SimPos, Velocity};
-use hk_sim::input::InputState;
-use hk_sim::{SimSet, DT};
-
-use crate::interp::Interpolated;
 
 pub struct ScenePlugin;
 
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GlobalAmbientLight {
-            color: Color::srgb(0.35, 0.42, 0.6),
-            brightness: 140.0,
+            color: Color::srgb(0.4, 0.46, 0.65),
+            brightness: 220.0,
             ..default()
         })
-        .add_systems(Startup, spawn_greybox)
-        // Throwaway mover so M0 can prove input -> sim -> interpolation ->
-        // render end to end. Replaced by the real controller in M1.
-        .add_systems(FixedUpdate, demo_mover.in_set(SimSet::Motion));
+        .add_systems(Startup, (spawn_palette, spawn_camera_and_lights));
     }
 }
 
-/// Visual FOV and distance chosen so ~16 world units are visible vertically
-/// at the z = 0 lane: d = 8 / tan(fov / 2).
-const FOV_DEG: f32 = 38.0;
-const CAM_DIST: f32 = 23.2;
+/// Camera field of view and distance, chosen so ~16 world units are visible
+/// vertically at the z = 0 lane: d = 8 / tan(fov / 2).
+pub const FOV_DEG: f32 = 38.0;
+pub const CAM_DIST: f32 = 23.2;
 
 #[derive(Component)]
-struct DemoMover;
+pub struct MainCamera;
 
-fn spawn_greybox(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-) {
-    let stone = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.16, 0.18, 0.24),
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    let far = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.08, 0.1, 0.16),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
-    let glow = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.2, 0.6, 0.9),
-        emissive: LinearRgba::rgb(0.6, 2.4, 4.0),
-        ..default()
-    });
-    let hero = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.9, 0.92, 1.0),
-        emissive: LinearRgba::rgb(0.15, 0.15, 0.2),
-        ..default()
-    });
+/// Material handles shared by everything that draws.
+#[derive(Resource, Clone)]
+pub struct Palette {
+    pub stone: Handle<StandardMaterial>,
+    pub one_way: Handle<StandardMaterial>,
+    pub backdrop: Handle<StandardMaterial>,
+    pub glow: Handle<StandardMaterial>,
+    pub player: Handle<StandardMaterial>,
+    pub enemy: Handle<StandardMaterial>,
+    pub hazard: Handle<StandardMaterial>,
+    pub slash: Handle<StandardMaterial>,
+    pub bolt: Handle<StandardMaterial>,
+    pub marker: Handle<StandardMaterial>,
+}
 
-    // Solid geometry on the gameplay lane (depth 4 u, centred on z = 0).
-    let solids: &[(Vec2, Vec2)] = &[
-        (Vec2::new(0.0, -1.0), Vec2::new(40.0, 2.0)),  // floor
-        (Vec2::new(-8.0, 3.0), Vec2::new(5.0, 0.6)),   // ledge
-        (Vec2::new(7.0, 5.5), Vec2::new(6.0, 0.6)),    // high ledge
-        (Vec2::new(-19.5, 6.0), Vec2::new(1.0, 14.0)), // left wall
-        (Vec2::new(19.5, 6.0), Vec2::new(1.0, 14.0)),  // right wall
-    ];
-    for (c, size) in solids {
-        commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(size.x, size.y, 4.0))),
-            MeshMaterial3d(stone.clone()),
-            Transform::from_xyz(c.x, c.y, 0.0),
-        ));
-    }
+fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>) {
+    let mut solid = |r: f32, g: f32, b: f32, rough: f32| {
+        mats.add(StandardMaterial {
+            base_color: Color::srgb(r, g, b),
+            perceptual_roughness: rough,
+            ..default()
+        })
+    };
+    let stone = solid(0.22, 0.25, 0.33, 0.9);
+    let one_way = solid(0.35, 0.3, 0.2, 0.8);
+    let backdrop = solid(0.1, 0.12, 0.2, 1.0);
+    let marker = solid(0.05, 0.05, 0.08, 0.5);
 
-    // Parallax layers at real depths.
-    for (z, count, h) in [(-6.0, 7, 9.0), (-14.0, 6, 14.0), (-30.0, 5, 24.0)] {
-        for i in 0..count {
-            let t = i as f32 / (count - 1) as f32;
-            let x = (t - 0.5) * 70.0 + (i as f32 * 3.7).sin() * 4.0;
-            commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(4.0 + (i % 3) as f32 * 2.0, h, 3.0))),
-                MeshMaterial3d(far.clone()),
-                Transform::from_xyz(x, h * 0.5 - 1.0, z),
-            ));
-        }
-    }
-    // A few glowing motes to catch bloom.
-    for (x, y, z) in [(-12.0, 4.0, -5.0), (4.0, 8.0, -9.0), (14.0, 3.0, -7.0)] {
-        commands.spawn((
-            Mesh3d(meshes.add(Sphere::new(0.18))),
-            MeshMaterial3d(glow.clone()),
-            Transform::from_xyz(x, y, z),
-        ));
-    }
-
-    // Placeholder hero: box centred on the sim position.
-    let start = Vec2::new(0.0, 0.75);
-    commands
-        .spawn((
-            DemoMover,
-            SimPos(start),
-            PrevPos(start),
-            Velocity::default(),
-            Interpolated {
-                z: 0.0,
-                offset: Vec2::ZERO,
+    let mut emissive = |base: Color, e: LinearRgba, alpha: f32| {
+        mats.add(StandardMaterial {
+            base_color: base.with_alpha(alpha),
+            emissive: e,
+            alpha_mode: if alpha < 1.0 {
+                AlphaMode::Blend
+            } else {
+                AlphaMode::Opaque
             },
-            Mesh3d(meshes.add(Cuboid::new(0.8, 1.5, 0.8))),
-            MeshMaterial3d(hero),
-            Transform::from_xyz(start.x, start.y, 0.0),
-        ))
-        .with_children(|p| {
-            // Follow lantern.
-            p.spawn((
-                PointLight {
-                    intensity: 900_000.0,
-                    range: 24.0,
-                    color: Color::srgb(1.0, 0.85, 0.6),
-                    shadows_enabled: false,
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 0.6, 2.5),
-            ));
-        });
+            unlit: alpha < 1.0,
+            ..default()
+        })
+    };
+    let glow = emissive(
+        Color::srgb(0.2, 0.6, 0.9),
+        LinearRgba::rgb(0.6, 2.4, 4.0),
+        1.0,
+    );
+    let player = emissive(
+        Color::srgb(0.92, 0.94, 1.0),
+        LinearRgba::rgb(0.1, 0.1, 0.16),
+        1.0,
+    );
+    let enemy = emissive(
+        Color::srgb(0.75, 0.25, 0.2),
+        LinearRgba::rgb(0.25, 0.04, 0.02),
+        1.0,
+    );
+    let hazard = emissive(
+        Color::srgb(0.6, 0.2, 0.7),
+        LinearRgba::rgb(0.8, 0.2, 1.2),
+        1.0,
+    );
+    let slash = emissive(
+        Color::srgb(0.9, 0.95, 1.0),
+        LinearRgba::rgb(2.0, 2.2, 2.6),
+        0.35,
+    );
+    let bolt = emissive(
+        Color::srgb(1.0, 0.6, 0.2),
+        LinearRgba::rgb(3.0, 1.4, 0.3),
+        0.6,
+    );
 
+    commands.insert_resource(Palette {
+        stone,
+        one_way,
+        backdrop,
+        glow,
+        player,
+        enemy,
+        hazard,
+        slash,
+        bolt,
+        marker,
+    });
+}
+
+fn spawn_camera_and_lights(mut commands: Commands) {
     // Cool rim/key light from behind-above.
     commands.spawn((
         DirectionalLight {
-            illuminance: 2500.0,
-            color: Color::srgb(0.5, 0.65, 1.0),
+            illuminance: 3500.0,
+            color: Color::srgb(0.55, 0.68, 1.0),
             shadows_enabled: false,
             ..default()
         },
-        Transform::from_xyz(-4.0, 8.0, -6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_xyz(-4.0, 8.0, 6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
 
     commands.spawn((
+        MainCamera,
         Camera3d::default(),
         Hdr,
         Projection::Perspective(PerspectiveProjection {
             fov: FOV_DEG.to_radians(),
             ..default()
         }),
-        Transform::from_xyz(0.0, 7.0, CAM_DIST).looking_at(Vec3::new(0.0, 7.0, 0.0), Vec3::Y),
+        Transform::from_xyz(4.0, 8.0, CAM_DIST).looking_at(Vec3::new(4.0, 8.0, 0.0), Vec3::Y),
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
         DistanceFog {
             color: Color::srgb(0.015, 0.02, 0.035),
             falloff: FogFalloff::Linear {
                 start: 22.0,
-                end: 75.0,
+                end: 80.0,
             },
             ..default()
         },
     ));
 }
 
-fn demo_mover(input: Res<InputState>, mut q: Query<(&mut SimPos, &mut Velocity), With<DemoMover>>) {
-    for (mut pos, mut vel) in &mut q {
-        vel.0.x = input.axis_x() as f32 * 9.0;
-        pos.0.x = (pos.0.x + vel.0.x * DT).clamp(-18.5, 18.5);
+/// Layered background slabs and glowing motes across `width` world units.
+pub fn spawn_backdrop(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    pal: &Palette,
+    width: f32,
+) {
+    for (z, count, h) in [(-6.0, 12, 10.0), (-14.0, 10, 16.0), (-30.0, 8, 26.0)] {
+        for i in 0..count {
+            let t = i as f32 / (count - 1) as f32;
+            let x = -10.0 + t * (width + 20.0) + (i as f32 * 3.7).sin() * 3.0;
+            let w = 4.0 + (i % 3) as f32 * 2.5;
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(w, h, 3.0))),
+                MeshMaterial3d(pal.backdrop.clone()),
+                Transform::from_xyz(x, h * 0.5 - 1.0, z),
+            ));
+        }
+    }
+    for i in 0..14 {
+        let x = i as f32 * width / 13.0;
+        let y = 4.0 + ((i * 7) % 11) as f32;
+        commands.spawn((
+            Mesh3d(meshes.add(Sphere::new(0.16))),
+            MeshMaterial3d(pal.glow.clone()),
+            Transform::from_xyz(x, y, -4.0 - (i % 4) as f32 * 2.0),
+        ));
     }
 }

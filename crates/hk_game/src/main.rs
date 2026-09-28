@@ -4,6 +4,7 @@
 mod debug;
 mod devices;
 mod interp;
+mod sandbox;
 mod scene;
 
 use bevy::prelude::*;
@@ -29,6 +30,7 @@ fn main() {
         SimPlugin,
         interp::InterpPlugin,
         scene::ScenePlugin,
+        sandbox::SandboxPlugin,
         debug::DebugPlugin { smoke },
     ));
 
