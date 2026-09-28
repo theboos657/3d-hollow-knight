@@ -6,6 +6,7 @@
 use bevy_app::{App, FixedUpdate, Plugin};
 use bevy_ecs::prelude::*;
 
+pub mod boss;
 pub mod camera;
 pub mod combat;
 pub mod components;
@@ -62,6 +63,10 @@ impl Plugin for SimPlugin {
             .init_resource::<world::room::WorldFlags>()
             .init_resource::<world::room::Transition>()
             .add_message::<world::room::RoomEntered>()
+            .init_resource::<boss::ArenaLock>()
+            .add_message::<boss::BossAwoke>()
+            .add_message::<boss::BossPhaseChanged>()
+            .add_message::<boss::BossDefeated>()
             .add_message::<combat::Hit>()
             .add_message::<combat::Blocked>()
             .add_message::<combat::PlayerDied>()
@@ -105,11 +110,18 @@ impl Plugin for SimPlugin {
                     combat::status::advance_hitstop,
                 )
                     .in_set(SimSet::Input),
-                (combat::attack::player_combat, enemy::ai::enemy_ai).in_set(SimSet::Intent),
+                (
+                    combat::attack::player_combat,
+                    enemy::ai::enemy_ai,
+                    boss::ai::boss_ai,
+                )
+                    .in_set(SimSet::Intent),
                 (
                     player::player_movement,
                     combat::attack::hitbox_follow.after(player::player_movement),
                     combat::attack::projectile_motion,
+                    boss::ai::glyph_tick,
+                    boss::ai::pendulum_motion,
                     (enemy::ai::enemy_motion, combat::attack::knockback_motion).chain(),
                 )
                     .in_set(SimSet::Motion),
@@ -123,6 +135,8 @@ impl Plugin for SimPlugin {
                     combat::status::player_status,
                     combat::status::tick_timers,
                     world::room::detect_exits,
+                    boss::ai::update_arena_lock,
+                    boss::ai::record_boss_defeat,
                 )
                     .in_set(SimSet::Status),
                 combat::status::cleanup_expired.in_set(SimSet::Cleanup),

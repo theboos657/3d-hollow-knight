@@ -2874,6 +2874,11 @@ dependencies = [
 [[package]]
 name = "hk_tools"
 version = "0.1.0"
+dependencies = [
+ "hk_sim",
+ "ron",
+ "serde",
+]
 
 [[package]]
 name = "image"

@@ -9,7 +9,7 @@ pub fn detect_hits(
     mut hits: MessageWriter<Hit>,
     mut blocked: MessageWriter<Blocked>,
     guards: Query<&Guard>,
-    mut hitboxes: Query<(Entity, &Hitbox, &SimPos, Option<&mut AlreadyHit>)>,
+    mut hitboxes: Query<(Entity, &Hitbox, &SimPos, Option<&mut AlreadyHit>), Without<Disarmed>>,
     hurtboxes: Query<(Entity, &Hurtbox, &SimPos, Option<&Invulnerable>)>,
     positions: Query<&SimPos>,
     facings: Query<&Facing>,

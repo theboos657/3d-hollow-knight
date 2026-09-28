@@ -3,8 +3,12 @@ name = "hk_tools"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Developer tools: tuning dump, room lint, boss bot"
 
 [lints]
 workspace = true
 
 [dependencies]
+hk_sim = { path = "../hk_sim" }
+ron = "0.12.2"
+serde = "1.0.229"

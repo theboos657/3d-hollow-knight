@@ -26,7 +26,16 @@ pub fn resolve_hits(
         ),
         With<Player>,
     >,
-    mut enemies: Query<(&mut Health, Option<&Poise>, &SimPos, Option<&SpawnTag>), Without<Player>>,
+    mut enemies: Query<
+        (
+            &mut Health,
+            Option<&Poise>,
+            &SimPos,
+            Option<&SpawnTag>,
+            Has<ManualDeath>,
+        ),
+        Without<Player>,
+    >,
     pogoable: Query<(), With<Pogoable>>,
 ) {
     let c = &tuning.combat;
@@ -82,10 +91,12 @@ pub fn resolve_hits(
                 }
             }
             Team::Enemy => {
-                if let Ok((mut hp, poise, pos, tag)) = enemies.get_mut(h.victim) {
+                if let Ok((mut hp, poise, pos, tag, manual)) = enemies.get_mut(h.victim) {
                     if hp.hp > 0 {
                         hp.hp -= h.damage;
-                        if hp.hp <= 0 {
+                        if hp.hp <= 0 && manual {
+                            // A boss: its own system plays the death sequence.
+                        } else if hp.hp <= 0 {
                             enemy_died.write(EnemyDied {
                                 entity: h.victim,
                                 pos: pos.0,

@@ -53,6 +53,10 @@ pub enum SpawnKind {
     Wisp,
     Shieldbearer,
     Spitter,
+    /// Mid-boss: grants Dash when defeated.
+    Matron,
+    /// The final boss.
+    Bellwarden,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -345,7 +349,7 @@ pub struct RoomEntered {
 
 fn kind_of(k: SpawnKind) -> Option<EnemyKind> {
     match k {
-        SpawnKind::Dummy => None,
+        SpawnKind::Dummy | SpawnKind::Matron | SpawnKind::Bellwarden => None,
         SpawnKind::Husk => Some(EnemyKind::Husk),
         SpawnKind::Wisp => Some(EnemyKind::Wisp),
         SpawnKind::Shieldbearer => Some(EnemyKind::Shieldbearer),
@@ -358,6 +362,28 @@ pub fn spawn_from_def(world: &mut World, def: &RoomDef, index: usize) -> Option<
     let s = def.spawns.get(index)?;
     let tag = def.spawn_tag(index);
     let (x, y) = s.at;
+    // Bosses are built by the boss module, inside the room's playable area.
+    let boss_id = match s.kind {
+        SpawnKind::Matron => Some("matron"),
+        SpawnKind::Bellwarden => Some("bellwarden"),
+        _ => None,
+    };
+    if let Some(id) = boss_id {
+        let arena = (
+            Vec2::new(1.0, 1.0),
+            Vec2::new(def.width() as f32 - 1.0, def.height() as f32 - 1.0),
+        );
+        return match crate::boss::spawn_boss(world, id, Vec2::new(x, y), arena) {
+            Ok(e) => {
+                world.entity_mut(e).insert(SpawnTag(tag));
+                Some(e)
+            }
+            Err(msg) => {
+                eprintln!("{msg}");
+                None
+            }
+        };
+    }
     match kind_of(s.kind) {
         Some(kind) => {
             // `at` is the bottom of the body; enemies are placed by centre.
@@ -596,11 +622,13 @@ impl Transition {
 
 /// Player touching an exit starts the transition.
 pub fn detect_exits(
+    lock: Res<crate::boss::ArenaLock>,
     mut tr: ResMut<Transition>,
     players: Query<(&SimPos, &Aabb), With<Player>>,
     exits: Query<(&SimPos, &RoomExit)>,
 ) {
-    if tr.active() {
+    // Exits are sealed while a boss fight is on.
+    if tr.active() || lock.0 {
         return;
     }
     for (p, pa) in &players {

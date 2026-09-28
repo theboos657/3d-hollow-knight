@@ -14,6 +14,7 @@ pub struct Tuning {
     pub combat: CombatTuning,
     pub enemies: EnemyTuning,
     pub camera: CameraTuning,
+    pub bosses: BossTuning,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -146,7 +147,7 @@ impl PlayerTuning {
 }
 
 impl Tuning {
-    /// Loads `player.ron`, `combat.ron`, `enemies.ron` and `camera.ron` from
+    /// Loads `player.ron`, `combat.ron`, `enemies.ron`, `camera.ron` and `bosses.ron` from
     /// `dir`. A missing or broken file falls back to the built-in default for
     /// that group and is reported in the returned warnings, so a typo while
     /// tuning never stops the game from starting.
@@ -177,6 +178,7 @@ impl Tuning {
             combat: load(dir, "combat.ron", &mut w),
             enemies: load(dir, "enemies.ron", &mut w),
             camera: load(dir, "camera.ron", &mut w),
+            bosses: load(dir, "bosses.ron", &mut w),
         };
         (t, w)
     }
@@ -669,6 +671,295 @@ impl CameraTuning {
     }
 }
 
+// ------------------------------------------------------------------ bosses --
+
+/// What an attack *does*. The shared boss state machine handles the timing
+/// (telegraph -> active -> recover); the kind decides the behaviour.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AttackKind {
+    /// Leap at the player, slam down, and send a shockwave along the floor each way.
+    Slam {
+        leap_vy: f32,
+        shock_speed: f32,
+        shock_ms: f32,
+    },
+    /// Rush across the arena. Hitting a wall staggers the boss (longer recovery).
+    Charge { speed: f32, wall_recover_mult: f32 },
+    /// Warning glyphs appear on the floor, then bells drop on them.
+    Bells {
+        count: u32,
+        warn_ms: f32,
+        spread: f32,
+    },
+    /// Two melee arcs in quick succession (the second has its own short tell).
+    Sweep {
+        reach: (f32, f32),
+        second_gap_ms: f32,
+    },
+    /// Swinging bells hang from the ceiling for a while: hazards you can pogo off.
+    Pendulums {
+        count: u32,
+        amp: f32,
+        period_ms: f32,
+        life_ms: f32,
+    },
+    /// Repeated shockwaves outward from the boss: jump each one.
+    Toll {
+        waves: u32,
+        interval_ms: f32,
+        speed: f32,
+    },
+}
+
+fn one_u8() -> u8 {
+    1
+}
+fn max_u8() -> u8 {
+    99
+}
+fn one_f32() -> f32 {
+    1.0
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AttackDef {
+    pub name: String,
+    pub kind: AttackKind,
+    /// The tell: the boss holds still and flashes. Never skipped.
+    pub telegraph_ms: f32,
+    pub active_ms: f32,
+    /// The punish window after the attack.
+    pub recover_ms: f32,
+    /// Horizontal distance to the player at which this attack may be chosen.
+    pub min_range: f32,
+    pub max_range: f32,
+    #[serde(default = "one_f32")]
+    pub weight: f32,
+    #[serde(default = "one_u8")]
+    pub min_phase: u8,
+    #[serde(default = "max_u8")]
+    pub max_phase: u8,
+    pub damage: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BossDef {
+    pub id: String,
+    pub name: String,
+    pub hp: i32,
+    pub half: (f32, f32),
+    pub walk_speed: f32,
+    /// Longest the boss walks toward the player before attacking anyway.
+    pub approach_ms: f32,
+    /// Waking roar at the start of the fight (invulnerable).
+    pub intro_ms: f32,
+    /// Invulnerable roar between phases.
+    pub transition_ms: f32,
+    /// Health fractions below which phases 2, 3, ... begin.
+    pub phase_thresholds: Vec<f32>,
+    /// Multiplier on recovery time per phase (later phases are snappier).
+    pub recover_mult: Vec<f32>,
+    pub contact_damage: i32,
+    pub death_ms: f32,
+    pub attacks: Vec<AttackDef>,
+}
+
+impl BossDef {
+    pub fn phases(&self) -> u8 {
+        self.phase_thresholds.len() as u8 + 1
+    }
+
+    /// Recovery multiplier for `phase` (1-based).
+    pub fn recover_mult_for(&self, phase: u8) -> f32 {
+        self.recover_mult
+            .get(phase as usize - 1)
+            .copied()
+            .unwrap_or(1.0)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BossTuning {
+    pub bosses: Vec<BossDef>,
+}
+
+impl BossTuning {
+    pub fn get(&self, id: &str) -> Option<&BossDef> {
+        self.bosses.iter().find(|b| b.id == id)
+    }
+}
+
+fn attack(
+    name: &str,
+    kind: AttackKind,
+    telegraph_ms: f32,
+    active_ms: f32,
+    recover_ms: f32,
+    range: (f32, f32),
+    weight: f32,
+    phases: (u8, u8),
+) -> AttackDef {
+    AttackDef {
+        name: name.into(),
+        kind,
+        telegraph_ms,
+        active_ms,
+        recover_ms,
+        min_range: range.0,
+        max_range: range.1,
+        weight,
+        min_phase: phases.0,
+        max_phase: phases.1,
+        damage: 1,
+    }
+}
+
+impl Default for BossTuning {
+    fn default() -> Self {
+        let slam = |tele, rec, w| {
+            attack(
+                "Toll Slam",
+                AttackKind::Slam {
+                    leap_vy: 20.0,
+                    shock_speed: 10.0,
+                    shock_ms: 2600.0,
+                },
+                tele,
+                900.0,
+                rec,
+                (3.0, 14.0),
+                w,
+                (1, 99),
+            )
+        };
+        let charge = |speed, tele, rec, w| {
+            attack(
+                "Warden's Charge",
+                AttackKind::Charge {
+                    speed,
+                    wall_recover_mult: 1.6,
+                },
+                tele,
+                1100.0,
+                rec,
+                (0.0, 40.0),
+                w,
+                (1, 99),
+            )
+        };
+        Self {
+            bosses: vec![
+                // The mid-boss: two attacks, one phase. Defeating it grants Dash.
+                BossDef {
+                    id: "matron".into(),
+                    name: "Gutter Matron".into(),
+                    hp: 300,
+                    half: (1.1, 1.3),
+                    walk_speed: 3.2,
+                    approach_ms: 1600.0,
+                    intro_ms: 1200.0,
+                    transition_ms: 1000.0,
+                    phase_thresholds: vec![],
+                    recover_mult: vec![1.0],
+                    contact_damage: 1,
+                    death_ms: 1800.0,
+                    attacks: vec![slam(600.0, 800.0, 1.0), charge(16.0, 500.0, 900.0, 1.0)],
+                },
+                // The final boss: three phases.
+                BossDef {
+                    id: "bellwarden".into(),
+                    name: "The Bellwarden".into(),
+                    hp: 800,
+                    half: (1.5, 2.0),
+                    walk_speed: 3.0,
+                    approach_ms: 1500.0,
+                    intro_ms: 2000.0,
+                    transition_ms: 1500.0,
+                    phase_thresholds: vec![0.65, 0.30],
+                    recover_mult: vec![1.0, 0.9, 0.8],
+                    contact_damage: 1,
+                    death_ms: 2500.0,
+                    attacks: vec![
+                        slam(650.0, 700.0, 3.0),
+                        charge(20.0, 550.0, 800.0, 2.0),
+                        attack(
+                            "Falling Bells",
+                            AttackKind::Bells {
+                                count: 3,
+                                warn_ms: 800.0,
+                                spread: 3.0,
+                            },
+                            800.0,
+                            1200.0,
+                            700.0,
+                            (0.0, 40.0),
+                            2.0,
+                            (1, 1),
+                        ),
+                        attack(
+                            "Falling Bells II",
+                            AttackKind::Bells {
+                                count: 5,
+                                warn_ms: 800.0,
+                                spread: 2.6,
+                            },
+                            800.0,
+                            1200.0,
+                            700.0,
+                            (0.0, 40.0),
+                            2.0,
+                            (2, 99),
+                        ),
+                        attack(
+                            "Chain Sweep",
+                            AttackKind::Sweep {
+                                reach: (3.2, 1.8),
+                                second_gap_ms: 400.0,
+                            },
+                            450.0,
+                            900.0,
+                            600.0,
+                            (0.0, 4.5),
+                            3.0,
+                            (2, 99),
+                        ),
+                        attack(
+                            "Pendulum Bells",
+                            AttackKind::Pendulums {
+                                count: 3,
+                                amp: 3.5,
+                                period_ms: 2600.0,
+                                life_ms: 9000.0,
+                            },
+                            700.0,
+                            300.0,
+                            600.0,
+                            (0.0, 40.0),
+                            1.0,
+                            (2, 99),
+                        ),
+                        attack(
+                            "Final Toll",
+                            AttackKind::Toll {
+                                waves: 3,
+                                interval_ms: 600.0,
+                                speed: 9.0,
+                            },
+                            800.0,
+                            1800.0,
+                            1300.0,
+                            (0.0, 40.0),
+                            2.0,
+                            (3, 99),
+                        ),
+                    ],
+                },
+            ],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -711,7 +1002,7 @@ mod tests {
         );
         assert_eq!(t.player.jump_height, PlayerTuning::default().jump_height);
         assert_eq!(t.combat, CombatTuning::default(), "broken file -> defaults");
-        assert_eq!(warnings.len(), 3, "{warnings:?}");
+        assert_eq!(warnings.len(), 4, "{warnings:?}"); // combat broken; enemies, camera, bosses missing
     }
 
     #[test]
@@ -722,6 +1013,19 @@ mod tests {
         assert_eq!(c.nail_cooldown_ticks(), 42);
         assert_eq!(c.iframes_ticks(), 156);
         assert_eq!(c.focus_ticks(), 120);
+    }
+
+    #[test]
+    fn shipped_bosses_ron_matches_defaults() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/tuning/bosses.ron"
+        );
+        let text = std::fs::read_to_string(path).expect(
+            "assets/tuning/bosses.ron exists (regenerate: cargo run -p hk_tools --bin dump_tuning -- assets/tuning --force)",
+        );
+        let parsed: BossTuning = ron::from_str(&text).expect("valid RON");
+        assert_eq!(parsed, BossTuning::default());
     }
 
     #[test]

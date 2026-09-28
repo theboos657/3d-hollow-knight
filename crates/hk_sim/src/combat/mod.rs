@@ -116,6 +116,15 @@ pub struct Lifetime(pub u32);
 #[derive(Component, Default)]
 pub struct Pogoable;
 
+/// A hitbox with this marker is inactive (boss waking, transitioning, dying).
+#[derive(Component, Default)]
+pub struct Disarmed;
+
+/// Reaching 0 HP does not despawn this enemy; its own system handles dying
+/// (bosses play a death sequence).
+#[derive(Component, Default)]
+pub struct ManualDeath;
+
 /// Cannot be hit while > 0 (ticks).
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Invulnerable(pub u32);
