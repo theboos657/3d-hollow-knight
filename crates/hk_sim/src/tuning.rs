@@ -12,6 +12,7 @@ use crate::ms_to_ticks;
 pub struct Tuning {
     pub player: PlayerTuning,
     pub combat: CombatTuning,
+    pub enemies: EnemyTuning,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -166,6 +167,9 @@ pub struct CombatTuning {
     // ---- feedback ----
     pub hitstop_nail_ms: f32,
     pub hitstop_hurt_ms: f32,
+    pub hitstop_block_ms: f32,
+    /// Push back on the player when a swing is blocked by a shield.
+    pub block_recoil_speed: f32,
 
     // ---- player health ----
     pub max_masks: i32,
@@ -215,6 +219,8 @@ impl Default for CombatTuning {
             nail_recoil_ms: 80.0,
             hitstop_nail_ms: 50.0,
             hitstop_hurt_ms: 120.0,
+            hitstop_block_ms: 40.0,
+            block_recoil_speed: 6.0,
             max_masks: 5,
             iframes_ms: 1300.0,
             stun_ms: 200.0,
@@ -263,6 +269,9 @@ impl CombatTuning {
     pub fn hitstop_hurt_ticks(&self) -> u32 {
         ms_to_ticks(self.hitstop_hurt_ms)
     }
+    pub fn hitstop_block_ticks(&self) -> u32 {
+        ms_to_ticks(self.hitstop_block_ms)
+    }
     pub fn iframes_ticks(&self) -> u32 {
         ms_to_ticks(self.iframes_ms)
     }
@@ -289,6 +298,277 @@ impl CombatTuning {
     }
     pub fn enemy_knock_ticks(&self) -> u32 {
         ms_to_ticks(self.enemy_knock_ms)
+    }
+}
+
+/// Shared enemy physics plus the four enemy types' numbers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EnemyTuning {
+    pub gravity: f32,
+    pub terminal_speed: f32,
+    pub contact_damage: i32,
+    pub husk: HuskTuning,
+    pub wisp: WispTuning,
+    pub shield: ShieldTuning,
+    pub spitter: SpitterTuning,
+}
+
+impl Default for EnemyTuning {
+    fn default() -> Self {
+        Self {
+            gravity: 60.0,
+            terminal_speed: 24.0,
+            contact_damage: 1,
+            husk: HuskTuning::default(),
+            wisp: WispTuning::default(),
+            shield: ShieldTuning::default(),
+            spitter: SpitterTuning::default(),
+        }
+    }
+}
+
+/// Gutter Husk: ground tracker. Patrol -> notice -> chase -> windup -> lunge -> recover.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HuskTuning {
+    pub hp: i32,
+    pub half: (f32, f32),
+    pub poise: f32,
+    pub patrol_range: f32,
+    pub patrol_speed: f32,
+    pub aggro_radius: f32,
+    /// Max vertical distance at which the player is noticed.
+    pub aggro_dy: f32,
+    /// Chase is abandoned beyond aggro_radius * leash_mult.
+    pub leash_mult: f32,
+    pub notice_ms: f32,
+    pub chase_speed: f32,
+    pub attack_range: f32,
+    pub windup_ms: f32,
+    pub lunge_speed: f32,
+    pub lunge_ms: f32,
+    pub recover_ms: f32,
+}
+
+impl Default for HuskTuning {
+    fn default() -> Self {
+        Self {
+            hp: 15,
+            half: (0.5, 0.6),
+            poise: 1.0,
+            patrol_range: 4.0,
+            patrol_speed: 2.0,
+            aggro_radius: 9.0,
+            aggro_dy: 3.5,
+            leash_mult: 1.6,
+            notice_ms: 300.0,
+            chase_speed: 4.5,
+            attack_range: 2.2,
+            windup_ms: 350.0,
+            lunge_speed: 12.0,
+            lunge_ms: 250.0,
+            recover_ms: 500.0,
+        }
+    }
+}
+
+impl HuskTuning {
+    pub fn notice_ticks(&self) -> u32 {
+        ms_to_ticks(self.notice_ms)
+    }
+    pub fn windup_ticks(&self) -> u32 {
+        ms_to_ticks(self.windup_ms)
+    }
+    pub fn lunge_ticks(&self) -> u32 {
+        ms_to_ticks(self.lunge_ms)
+    }
+    pub fn recover_ticks(&self) -> u32 {
+        ms_to_ticks(self.recover_ms)
+    }
+}
+
+/// Wisp: flying tracker. Hover -> notice -> chase above -> windup -> dive -> recover.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WispTuning {
+    pub hp: i32,
+    pub half: (f32, f32),
+    pub poise: f32,
+    pub aggro_radius: f32,
+    pub notice_ms: f32,
+    pub chase_speed: f32,
+    /// Height it tries to hold above the player while chasing.
+    pub hover_height: f32,
+    /// Horizontal distance under which it commits to a dive.
+    pub dive_dx: f32,
+    pub windup_ms: f32,
+    pub dive_speed: f32,
+    pub dive_ms: f32,
+    pub recover_ms: f32,
+    pub bob_amp: f32,
+    pub bob_period_ms: f32,
+}
+
+impl Default for WispTuning {
+    fn default() -> Self {
+        Self {
+            hp: 10,
+            half: (0.45, 0.45),
+            poise: 0.7,
+            aggro_radius: 10.0,
+            notice_ms: 300.0,
+            chase_speed: 3.5,
+            hover_height: 2.5,
+            dive_dx: 1.2,
+            windup_ms: 400.0,
+            dive_speed: 11.0,
+            dive_ms: 400.0,
+            recover_ms: 600.0,
+            bob_amp: 0.4,
+            bob_period_ms: 2000.0,
+        }
+    }
+}
+
+impl WispTuning {
+    pub fn notice_ticks(&self) -> u32 {
+        ms_to_ticks(self.notice_ms)
+    }
+    pub fn windup_ticks(&self) -> u32 {
+        ms_to_ticks(self.windup_ms)
+    }
+    pub fn dive_ticks(&self) -> u32 {
+        ms_to_ticks(self.dive_ms)
+    }
+    pub fn recover_ticks(&self) -> u32 {
+        ms_to_ticks(self.recover_ms)
+    }
+    pub fn bob_period_ticks(&self) -> u32 {
+        ms_to_ticks(self.bob_period_ms).max(1)
+    }
+}
+
+/// Shieldbearer: slow, guarded from the front (nail and bolt), weak to
+/// pogo and to attacks from behind. Turns slowly.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShieldTuning {
+    pub hp: i32,
+    pub half: (f32, f32),
+    pub poise: f32,
+    pub patrol_range: f32,
+    pub patrol_speed: f32,
+    pub aggro_radius: f32,
+    pub aggro_dy: f32,
+    pub notice_ms: f32,
+    pub speed: f32,
+    /// Time the player must stay behind it before it turns around.
+    pub turn_delay_ms: f32,
+    pub bash_range: f32,
+    pub windup_ms: f32,
+    pub bash_speed: f32,
+    pub bash_ms: f32,
+    pub recover_ms: f32,
+}
+
+impl Default for ShieldTuning {
+    fn default() -> Self {
+        Self {
+            hp: 25,
+            half: (0.55, 0.75),
+            poise: 0.5,
+            patrol_range: 3.0,
+            patrol_speed: 1.5,
+            aggro_radius: 9.0,
+            aggro_dy: 3.5,
+            notice_ms: 400.0,
+            speed: 2.5,
+            turn_delay_ms: 600.0,
+            bash_range: 2.4,
+            windup_ms: 500.0,
+            bash_speed: 8.0,
+            bash_ms: 300.0,
+            recover_ms: 800.0,
+        }
+    }
+}
+
+impl ShieldTuning {
+    pub fn notice_ticks(&self) -> u32 {
+        ms_to_ticks(self.notice_ms)
+    }
+    pub fn turn_delay_ticks(&self) -> u32 {
+        ms_to_ticks(self.turn_delay_ms)
+    }
+    pub fn windup_ticks(&self) -> u32 {
+        ms_to_ticks(self.windup_ms)
+    }
+    pub fn bash_ticks(&self) -> u32 {
+        ms_to_ticks(self.bash_ms)
+    }
+    pub fn recover_ticks(&self) -> u32 {
+        ms_to_ticks(self.recover_ms)
+    }
+}
+
+/// Spitter: keeps its distance and lobs a slow blob after a clear tell.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SpitterTuning {
+    pub hp: i32,
+    pub half: (f32, f32),
+    pub poise: f32,
+    pub aggro_radius: f32,
+    pub aggro_dy: f32,
+    /// Retreats when the player is closer than this.
+    pub min_range: f32,
+    /// Advances when the player is farther than this.
+    pub max_range: f32,
+    pub retreat_speed: f32,
+    pub advance_speed: f32,
+    pub notice_ms: f32,
+    pub windup_ms: f32,
+    pub recover_ms: f32,
+    pub shot_speed: f32,
+    pub shot_lifetime_ms: f32,
+    pub shot_half: (f32, f32),
+}
+
+impl Default for SpitterTuning {
+    fn default() -> Self {
+        Self {
+            hp: 15,
+            half: (0.5, 0.6),
+            poise: 1.0,
+            aggro_radius: 12.0,
+            aggro_dy: 3.5,
+            min_range: 5.0,
+            max_range: 11.0,
+            retreat_speed: 3.5,
+            advance_speed: 2.0,
+            notice_ms: 300.0,
+            windup_ms: 500.0,
+            recover_ms: 1200.0,
+            shot_speed: 9.0,
+            shot_lifetime_ms: 2000.0,
+            shot_half: (0.25, 0.25),
+        }
+    }
+}
+
+impl SpitterTuning {
+    pub fn notice_ticks(&self) -> u32 {
+        ms_to_ticks(self.notice_ms)
+    }
+    pub fn windup_ticks(&self) -> u32 {
+        ms_to_ticks(self.windup_ms)
+    }
+    pub fn recover_ticks(&self) -> u32 {
+        ms_to_ticks(self.recover_ms)
+    }
+    pub fn shot_lifetime_ticks(&self) -> u32 {
+        ms_to_ticks(self.shot_lifetime_ms)
     }
 }
 
@@ -319,6 +599,17 @@ mod tests {
         assert_eq!(c.nail_cooldown_ticks(), 42);
         assert_eq!(c.iframes_ticks(), 156);
         assert_eq!(c.focus_ticks(), 120);
+    }
+
+    #[test]
+    fn shipped_enemies_ron_matches_defaults() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/tuning/enemies.ron"
+        );
+        let text = std::fs::read_to_string(path).expect("assets/tuning/enemies.ron exists");
+        let parsed: EnemyTuning = ron::from_str(&text).expect("valid RON");
+        assert_eq!(parsed, EnemyTuning::default());
     }
 
     #[test]

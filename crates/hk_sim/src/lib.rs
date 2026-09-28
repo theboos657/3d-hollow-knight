@@ -8,6 +8,7 @@ use bevy_ecs::prelude::*;
 
 pub mod combat;
 pub mod components;
+pub mod enemy;
 pub mod input;
 pub mod player;
 pub mod rng;
@@ -56,6 +57,7 @@ impl Plugin for SimPlugin {
             .init_resource::<combat::SimFrozen>()
             .init_resource::<combat::RespawnPoint>()
             .add_message::<combat::Hit>()
+            .add_message::<combat::Blocked>()
             .add_message::<combat::PlayerDied>()
             .add_message::<combat::PlayerRespawned>()
             .add_message::<combat::EnemyDied>()
@@ -92,16 +94,20 @@ impl Plugin for SimPlugin {
             (
                 advance_tick.before(SimSet::Input),
                 (components::snapshot_prev, combat::status::advance_hitstop).in_set(SimSet::Input),
-                combat::attack::player_combat.in_set(SimSet::Intent),
+                (combat::attack::player_combat, enemy::ai::enemy_ai).in_set(SimSet::Intent),
                 (
                     player::player_movement,
                     combat::attack::hitbox_follow.after(player::player_movement),
                     combat::attack::projectile_motion,
-                    combat::attack::knockback_motion,
+                    (enemy::ai::enemy_motion, combat::attack::knockback_motion).chain(),
                 )
                     .in_set(SimSet::Motion),
                 combat::detect::detect_hits.in_set(SimSet::HitDetect),
-                combat::resolve::resolve_hits.in_set(SimSet::HitResolve),
+                (
+                    combat::resolve::resolve_hits,
+                    combat::resolve::resolve_blocks,
+                )
+                    .in_set(SimSet::HitResolve),
                 (combat::status::player_status, combat::status::tick_timers).in_set(SimSet::Status),
                 combat::status::cleanup_expired.in_set(SimSet::Cleanup),
             ),

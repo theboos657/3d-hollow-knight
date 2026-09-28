@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use hk_sim::combat::*;
 use hk_sim::components::{Aabb, PrevPos, SimPos, Velocity};
+use hk_sim::enemy::{spawn_enemy, Brain, EnemyKind, EnemyState};
 use hk_sim::player::{spawn_player, Abilities, Facing, Player, PlayerState};
 use hk_sim::world::{Tile, TileGrid};
 use hk_sim::SimTick;
@@ -32,7 +33,9 @@ impl Plugin for SandboxPlugin {
                     update_nose,
                     player_fx,
                     update_hud,
-                    respawn_dummies,
+                    enemy_fx,
+                    update_shield_plates,
+                    respawn_enemies,
                 )
                     .after(RenderPrepSet),
             )
@@ -104,20 +107,52 @@ fn spawn_level_meshes(
     }
 }
 
-fn spawn_dummy(commands: &mut Commands, pos: Vec2) {
-    let half = Vec2::new(0.5, 0.6);
-    commands.spawn((
-        SimPos(pos),
-        PrevPos(pos),
-        Velocity::default(),
-        Aabb { half },
-        Hurtbox {
-            half,
-            team: Team::Enemy,
-        },
-        Health::full(40),
-        Pogoable,
-    ));
+/// What can stand at a sandbox spawn point. `Dummy` is a passive punching bag.
+#[derive(Clone, Copy)]
+enum Spawn {
+    Dummy,
+    Enemy(EnemyKind),
+}
+
+/// Sandbox spawn table. The index is the `SpawnTag`, so a dead enemy comes
+/// back at the same spot.
+const SPAWNS: &[(Spawn, Vec2)] = &[
+    (Spawn::Dummy, Vec2::new(8.5, 2.6)),   // 0 ground bag
+    (Spawn::Dummy, Vec2::new(22.0, 12.0)), // 1 floating (up-slash)
+    (Spawn::Dummy, Vec2::new(47.0, 5.5)),  // 2 over the pit (pogo)
+    (Spawn::Dummy, Vec2::new(58.0, 6.6)),  // 3 far ledge
+    (Spawn::Enemy(EnemyKind::Husk), Vec2::new(14.0, 2.7)), // 4 husk near the start
+    (Spawn::Enemy(EnemyKind::Shieldbearer), Vec2::new(30.0, 2.9)), // 5
+    (Spawn::Enemy(EnemyKind::Wisp), Vec2::new(36.0, 9.0)), // 6
+    (Spawn::Enemy(EnemyKind::Spitter), Vec2::new(57.0, 2.7)), // 7
+];
+
+fn spawn_at(commands: &mut Commands, tag: u32) {
+    let (kind, pos) = SPAWNS[tag as usize];
+    match kind {
+        Spawn::Dummy => {
+            let half = Vec2::new(0.5, 0.6);
+            commands.spawn((
+                SpawnTag(tag),
+                SimPos(pos),
+                PrevPos(pos),
+                Velocity::default(),
+                Aabb { half },
+                Hurtbox {
+                    half,
+                    team: Team::Enemy,
+                },
+                Health::full(40),
+                Pogoable,
+            ));
+        }
+        Spawn::Enemy(k) => {
+            commands.queue(move |world: &mut World| {
+                let e = spawn_enemy(world, k, pos);
+                world.entity_mut(e).insert(SpawnTag(tag));
+            });
+        }
+    }
 }
 
 fn build_sandbox(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, pal: Res<Palette>) {
@@ -139,14 +174,8 @@ fn build_sandbox(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, pal: 
         );
     });
 
-    // Punching bags: ground, floating (up-slash), over the pit (pogo), on the far ledge.
-    for p in [
-        Vec2::new(8.5, 2.6),
-        Vec2::new(22.0, 12.0),
-        Vec2::new(47.0, 5.5),
-        Vec2::new(58.0, 6.6),
-    ] {
-        spawn_dummy(&mut commands, p);
+    for tag in 0..SPAWNS.len() as u32 {
+        spawn_at(&mut commands, tag);
     }
 
     // Spikes on the pit floor. Hurt on touch, and pogo-able from above.
@@ -175,29 +204,119 @@ fn build_sandbox(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, pal: 
 
 // ---------------------------------------------------------------- visuals --
 
-/// Bodies (player, dummies, spikes) get a box the size of their hurt/collision box.
+fn kind_color(kind: EnemyKind) -> Color {
+    match kind {
+        EnemyKind::Husk => Color::srgb(0.7, 0.3, 0.2),
+        EnemyKind::Wisp => Color::srgb(0.6, 0.35, 0.9),
+        EnemyKind::Shieldbearer => Color::srgb(0.25, 0.55, 0.6),
+        EnemyKind::Spitter => Color::srgb(0.4, 0.7, 0.3),
+    }
+}
+
+#[derive(Component)]
+struct ShieldPlate;
+
+/// Bodies (player, dummies, enemies, spikes) get a box the size of their
+/// hurt/collision box. Real enemies get their own material so state tints work.
+#[allow(clippy::type_complexity)]
 fn attach_body_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
     pal: Res<Palette>,
-    q: Query<(Entity, &Hurtbox, Option<&Aabb>, &SimPos), Added<Hurtbox>>,
+    q: Query<
+        (
+            Entity,
+            &Hurtbox,
+            Option<&Aabb>,
+            &SimPos,
+            Option<&Brain>,
+            Has<Guard>,
+        ),
+        Added<Hurtbox>,
+    >,
 ) {
-    for (e, hu, aabb, pos) in &q {
+    for (e, hu, aabb, pos, brain, guard) in &q {
         let half = aabb.map_or(hu.half, |a| a.half);
-        let mat = match hu.team {
-            Team::Player => &pal.player,
-            Team::Enemy => &pal.enemy,
-            Team::Hazard => &pal.hazard,
+        let (mesh, mat) = if let Some(b) = brain {
+            let mesh = if b.kind == EnemyKind::Wisp {
+                meshes.add(Sphere::new(half.x))
+            } else {
+                meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8))
+            };
+            let m = mats.add(StandardMaterial {
+                base_color: kind_color(b.kind),
+                ..default()
+            });
+            (mesh, m)
+        } else {
+            let mat = match hu.team {
+                Team::Player => &pal.player,
+                Team::Enemy => &pal.enemy,
+                Team::Hazard => &pal.hazard,
+            };
+            (
+                meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8)),
+                mat.clone(),
+            )
         };
         commands.entity(e).insert((
-            Mesh3d(meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8))),
-            MeshMaterial3d(mat.clone()),
+            Mesh3d(mesh),
+            MeshMaterial3d(mat),
             Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
             Interpolated {
                 z: 0.0,
                 offset: Vec2::ZERO,
             },
         ));
+        if guard {
+            commands.entity(e).with_children(|p| {
+                p.spawn((
+                    ShieldPlate,
+                    Mesh3d(meshes.add(Cuboid::new(0.18, half.y * 1.7, 1.1))),
+                    MeshMaterial3d(pal.player.clone()),
+                    Transform::from_xyz(half.x + 0.1, 0.0, 0.1),
+                ));
+            });
+        }
+    }
+}
+
+/// The shield plate sits on the side the Shieldbearer is guarding.
+fn update_shield_plates(
+    guards: Query<(&Guard, &Children)>,
+    mut plates: Query<&mut Transform, With<ShieldPlate>>,
+) {
+    for (g, children) in &guards {
+        for c in children.iter() {
+            if let Ok(mut t) = plates.get_mut(c) {
+                t.translation.x = 0.65 * g.facing as f32;
+            }
+        }
+    }
+}
+
+/// Telegraph colours: what an enemy is doing must be readable at a glance.
+fn enemy_fx(
+    tick: Res<SimTick>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+    q: Query<(&Brain, &MeshMaterial3d<StandardMaterial>)>,
+) {
+    for (b, handle) in &q {
+        let Some(m) = mats.get_mut(&handle.0) else {
+            continue;
+        };
+        let base = kind_color(b.kind).to_linear();
+        m.emissive = match b.state {
+            EnemyState::Idle => LinearRgba::rgb(base.red * 0.1, base.green * 0.1, base.blue * 0.1),
+            EnemyState::Chase => LinearRgba::rgb(base.red * 0.3, base.green * 0.3, base.blue * 0.3),
+            EnemyState::Notice => LinearRgba::rgb(2.0, 1.8, 0.2),
+            EnemyState::Windup if (tick.0 / 4) & 1 == 0 => LinearRgba::rgb(4.0, 2.4, 0.4),
+            EnemyState::Windup => LinearRgba::rgb(1.6, 0.8, 0.1),
+            EnemyState::Attack => LinearRgba::rgb(4.0, 0.3, 0.3),
+            EnemyState::Recover => LinearRgba::rgb(0.1, 0.35, 1.4),
+            EnemyState::Stagger => LinearRgba::rgb(2.0, 2.0, 2.0),
+        };
     }
 }
 
@@ -210,10 +329,10 @@ fn attach_hit_visuals(
     q: Query<(Entity, &Hitbox, &SimPos), (Added<Hitbox>, Without<Hurtbox>)>,
 ) {
     for (e, hb, pos) in &q {
-        let mat = if hb.kind == HitKind::Spell {
-            &pal.bolt
-        } else {
-            &pal.slash
+        let mat = match hb.kind {
+            HitKind::Spell => &pal.bolt,
+            HitKind::Projectile => &pal.hazard,
+            _ => &pal.slash,
         };
         commands.entity(e).insert((
             Mesh3d(meshes.add(Cuboid::new(hb.half.x * 2.0, hb.half.y * 2.0, 0.6))),
@@ -390,21 +509,23 @@ fn camera_follow(
 
 // -------------------------------------------------------------- housekeeping --
 
-/// Punching bags come back a couple of seconds after dying.
-fn respawn_dummies(
+/// Anything killed comes back at its spawn point a few seconds later.
+fn respawn_enemies(
     time: Res<Time>,
     mut died: MessageReader<EnemyDied>,
-    mut pending: Local<Vec<(f32, Vec2)>>,
+    mut pending: Local<Vec<(f32, u32)>>,
     mut commands: Commands,
 ) {
     for d in died.read() {
-        pending.push((2.5, d.pos));
+        if let Some(tag) = d.tag {
+            pending.push((4.0, tag));
+        }
     }
     let dt = time.delta_secs();
-    pending.retain_mut(|(t, pos)| {
+    pending.retain_mut(|(t, tag)| {
         *t -= dt;
         if *t <= 0.0 {
-            spawn_dummy(&mut commands, *pos);
+            spawn_at(&mut commands, *tag);
             false
         } else {
             true

@@ -12,6 +12,8 @@
     nail_recoil_ms: 80.0,
     hitstop_nail_ms: 50.0,
     hitstop_hurt_ms: 120.0,
+    hitstop_block_ms: 40.0,
+    block_recoil_speed: 6.0,
     max_masks: 5,
     iframes_ms: 1300.0,
     stun_ms: 200.0,

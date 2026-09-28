@@ -29,12 +29,17 @@ pub fn resolve_hits(
         ),
         With<Player>,
     >,
-    mut enemies: Query<(&mut Health, Option<&Poise>, &SimPos), Without<Player>>,
+    mut enemies: Query<(&mut Health, Option<&Poise>, &SimPos, Option<&SpawnTag>), Without<Player>>,
     pogoable: Query<(), With<Pogoable>>,
 ) {
     let c = &tuning.combat;
 
     for h in hits.read() {
+        // Enemy projectiles are spent when they hit.
+        if h.kind == HitKind::Projectile {
+            commands.entity(h.hitbox).despawn();
+        }
+
         // ------------------------------------------------ the victim ------
         match h.victim_team {
             Team::Player => {
@@ -80,13 +85,14 @@ pub fn resolve_hits(
                 }
             }
             Team::Enemy => {
-                if let Ok((mut hp, poise, pos)) = enemies.get_mut(h.victim) {
+                if let Ok((mut hp, poise, pos, tag)) = enemies.get_mut(h.victim) {
                     if hp.hp > 0 {
                         hp.hp -= h.damage;
                         if hp.hp <= 0 {
                             enemy_died.write(EnemyDied {
                                 entity: h.victim,
                                 pos: pos.0,
+                                tag: tag.map(|t| t.0),
                             });
                             commands.entity(h.victim).despawn();
                         } else {
@@ -124,6 +130,31 @@ pub fn resolve_hits(
                     cs.control_lock = c.nail_recoil_ticks() + 1;
                 }
             }
+        }
+    }
+}
+
+/// Shield blocks: small freeze and a push back, but no damage and no soul.
+pub fn resolve_blocks(
+    mut commands: Commands,
+    mut blocked: MessageReader<Blocked>,
+    tuning: Res<Tuning>,
+    mut hitstop: ResMut<HitStop>,
+    mut players: Query<(&mut Velocity, &mut CombatState), With<Player>>,
+) {
+    let c = &tuning.combat;
+    for b in blocked.read() {
+        hitstop.0 = hitstop.0.max(c.hitstop_block_ticks());
+        match b.kind {
+            HitKind::Nail => {
+                if let Ok((mut vel, mut cs)) = players.get_mut(b.source) {
+                    vel.x = -(b.dir as f32) * c.block_recoil_speed;
+                    cs.control_lock = c.nail_recoil_ticks() + 1;
+                }
+            }
+            // A bolt stops dead against a shield.
+            HitKind::Spell => commands.entity(b.hitbox).despawn(),
+            _ => {}
         }
     }
 }

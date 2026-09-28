@@ -68,6 +68,8 @@ pub enum HitKind {
     Spell,
     /// Body contact from an enemy.
     Contact,
+    /// An enemy's thrown/spat projectile (disappears when it hits).
+    Projectile,
     /// Spikes and similar: damage, then respawn at safe ground.
     Hazard,
 }
@@ -178,6 +180,13 @@ pub struct HitStop(pub u32);
 #[derive(Resource, Default, Debug)]
 pub struct SimFrozen(pub bool);
 
+/// A shield: blocks nail and bolt hits that come from the side it faces.
+/// (Down-slashes and hits from behind are not blocked.)
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Guard {
+    pub facing: i8,
+}
+
 /// Where the player comes back after dying (set by benches).
 #[derive(Resource, Clone, Copy, Debug, Default)]
 pub struct RespawnPoint(pub Vec2);
@@ -203,14 +212,32 @@ pub struct Hit {
     pub pos: Vec2,
 }
 
+/// A hit that a [`Guard`] absorbed: no damage, no soul, but feedback.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Blocked {
+    pub hitbox: Entity,
+    pub source: Entity,
+    pub victim: Entity,
+    pub kind: HitKind,
+    /// Direction the victim would have been pushed (away from the attacker).
+    pub dir: i8,
+    pub pos: Vec2,
+}
+
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PlayerDied;
 
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PlayerRespawned;
 
+/// Identifies which level spawn point an enemy came from, so the world can
+/// respawn or permanently remove it.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpawnTag(pub u32);
+
 #[derive(Message, Clone, Copy, Debug)]
 pub struct EnemyDied {
     pub entity: Entity,
     pub pos: Vec2,
+    pub tag: Option<u32>,
 }

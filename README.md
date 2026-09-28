@@ -5,8 +5,8 @@ on a 2D gameplay plane with true 3D lighting, depth and parallax. Built in Rust 
 [Bevy](https://bevy.org) 0.18.
 
 > **Status:** work in progress. Playable today: the movement/combat **sandbox**
-> (below). Enemies, rooms, the boss and the world are being built milestone by
-> milestone (see the plan in the session history / `docs/`).
+> with four enemy types (below). Rooms, the boss and the world are being built
+> milestone by milestone.
 
 ## Play it
 
@@ -40,10 +40,27 @@ on a 2D gameplay plane with true 3D lighting, depth and parallax. Built in Rust 
 The sandbox unlocks everything: try the wall-jump shaft on the left, the thin
 platforms, and the spike pit on the right (pogo off the floating dummy to cross it).
 
+Enemies (they all telegraph, and glow to show what they are doing):
+
+| Colour | Meaning |
+|---|---|
+| yellow | just noticed you |
+| flashing orange | **windup**: an attack is coming, get out of the way |
+| red | attacking |
+| blue | recovering: **hit it now** |
+
+* **Husk** (red-brown): patrols, chases, lunges. 15 HP.
+* **Shieldbearer** (teal, white plate): the plate blocks nail and bolt from the front.
+  Pogo it from above, or hit it from behind while it turns slowly.
+* **Wisp** (purple ball): flies above you, then dives.
+* **Spitter** (green): backs away and spits a slow blob; dodge or jump it.
+
+Everything respawns a few seconds after dying.
+
 ## Development
 
 ```
-cargo test --workspace                 # simulation tests (headless, ~65 tests)
+cargo test --workspace                 # simulation tests (headless, ~90 tests)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p hk_game --features dev    # faster rebuilds (dynamic linking; Linux/macOS)
 ```

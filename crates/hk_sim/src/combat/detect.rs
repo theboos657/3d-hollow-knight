@@ -6,9 +6,11 @@ use super::*;
 use crate::components::SimPos;
 use crate::player::Facing;
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn detect_hits(
     mut hits: MessageWriter<Hit>,
+    mut blocked: MessageWriter<Blocked>,
+    guards: Query<&Guard>,
     mut hitboxes: Query<(Entity, &Hitbox, &SimPos, Option<&mut AlreadyHit>)>,
     hurtboxes: Query<(Entity, &Hurtbox, &SimPos, Option<&Invulnerable>)>,
     positions: Query<&SimPos>,
@@ -44,7 +46,11 @@ pub fn detect_hits(
                 struck_by_persistent.push(victim);
             }
 
-            let src = positions.get(hb.owner).map(|p| p.0).unwrap_or(hb_pos.0);
+            // Projectiles push from where they are; melee pushes from the owner.
+            let src = match hb.kind {
+                HitKind::Spell | HitKind::Projectile => hb_pos.0,
+                _ => positions.get(hb.owner).map(|p| p.0).unwrap_or(hb_pos.0),
+            };
             let dx = v_pos.0.x - src.x;
             let dir = if dx > 0.0 {
                 1
@@ -53,6 +59,23 @@ pub fn detect_hits(
             } else {
                 facings.get(hb.owner).map(|f| f.0).unwrap_or(1)
             };
+            // A shield facing the attacker absorbs forward nail/bolt hits.
+            if let Ok(g) = guards.get(victim) {
+                if hb.attack_dir == AttackDir::Forward
+                    && matches!(hb.kind, HitKind::Nail | HitKind::Spell)
+                    && (src.x - v_pos.0.x) * g.facing as f32 > 0.0
+                {
+                    blocked.write(Blocked {
+                        hitbox: hb_entity,
+                        source: hb.owner,
+                        victim,
+                        kind: hb.kind,
+                        dir,
+                        pos: (hb_pos.0 + v_pos.0) * 0.5,
+                    });
+                    continue;
+                }
+            }
             hits.write(Hit {
                 hitbox: hb_entity,
                 source: hb.owner,
