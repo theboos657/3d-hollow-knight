@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/hk_sim", "crates/hk_game", "crates/hk_tools"]
+default-members = ["crates/hk_sim"]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+# Fast iteration: our code at opt-level 1, all dependencies (Bevy) at 3.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"

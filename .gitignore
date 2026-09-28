@@ -1,0 +1,5 @@
+/target
+/saves
+/out
+*.swp
+.DS_Store
