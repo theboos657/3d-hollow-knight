@@ -11,12 +11,18 @@ use crate::tuning::Tuning;
 
 /// Decides whether this tick is frozen by hitstop. Runs in `SimSet::Input`,
 /// which is never gated, so input keeps latching during freeze frames.
-pub fn advance_hitstop(mut hs: ResMut<HitStop>, mut frozen: ResMut<SimFrozen>) {
+pub fn advance_hitstop(
+    mut hs: ResMut<HitStop>,
+    mut frozen: ResMut<SimFrozen>,
+    transition: Res<crate::world::room::Transition>,
+) {
+    // Gameplay also freezes while a room transition fades out and back in.
+    let in_transition = transition.active();
     if hs.0 > 0 {
         hs.0 -= 1;
         frozen.0 = true;
     } else {
-        frozen.0 = false;
+        frozen.0 = in_transition;
     }
 }
 
@@ -26,8 +32,6 @@ const RESPAWN_IFRAMES_MS: f32 = 500.0;
 /// Safe ground is never recorded this close to a hazard (world units), so a
 /// spike respawn can't drop the player right back onto the spikes.
 const HAZARD_MARGIN: f32 = 1.5;
-
-#[allow(clippy::type_complexity)]
 pub fn player_status(
     mut commands: Commands,
     tuning: Res<Tuning>,

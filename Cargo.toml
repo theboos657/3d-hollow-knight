@@ -3,6 +3,12 @@ resolver = "2"
 members = ["crates/hk_sim", "crates/hk_game", "crates/hk_tools"]
 default-members = ["crates/hk_sim"]
 
+[workspace.lints.clippy]
+# Bevy systems take queries and resources as parameters, and query types are
+# naturally long; these two lints only add noise to ECS code.
+too_many_arguments = "allow"
+type_complexity = "allow"
+
 [workspace.package]
 edition = "2021"
 version = "0.1.0"

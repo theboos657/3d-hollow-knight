@@ -6,6 +6,7 @@
 use bevy_app::{App, FixedUpdate, Plugin};
 use bevy_ecs::prelude::*;
 
+pub mod camera;
 pub mod combat;
 pub mod components;
 pub mod enemy;
@@ -56,6 +57,11 @@ impl Plugin for SimPlugin {
             .init_resource::<combat::HitStop>()
             .init_resource::<combat::SimFrozen>()
             .init_resource::<combat::RespawnPoint>()
+            .init_resource::<world::room::RoomLibrary>()
+            .init_resource::<world::room::CurrentRoom>()
+            .init_resource::<world::room::WorldFlags>()
+            .init_resource::<world::room::Transition>()
+            .add_message::<world::room::RoomEntered>()
             .add_message::<combat::Hit>()
             .add_message::<combat::Blocked>()
             .add_message::<combat::PlayerDied>()
@@ -93,7 +99,12 @@ impl Plugin for SimPlugin {
             FixedUpdate,
             (
                 advance_tick.before(SimSet::Input),
-                (components::snapshot_prev, combat::status::advance_hitstop).in_set(SimSet::Input),
+                (
+                    components::snapshot_prev,
+                    world::room::run_transition.before(combat::status::advance_hitstop),
+                    combat::status::advance_hitstop,
+                )
+                    .in_set(SimSet::Input),
                 (combat::attack::player_combat, enemy::ai::enemy_ai).in_set(SimSet::Intent),
                 (
                     player::player_movement,
@@ -108,7 +119,12 @@ impl Plugin for SimPlugin {
                     combat::resolve::resolve_blocks,
                 )
                     .in_set(SimSet::HitResolve),
-                (combat::status::player_status, combat::status::tick_timers).in_set(SimSet::Status),
+                (
+                    combat::status::player_status,
+                    combat::status::tick_timers,
+                    world::room::detect_exits,
+                )
+                    .in_set(SimSet::Status),
                 combat::status::cleanup_expired.in_set(SimSet::Cleanup),
             ),
         );

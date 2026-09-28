@@ -9,6 +9,9 @@ description = "Hollow Knight 3D game binary: rendering, camera, audio, UI"
 # `cargo run -p hk_game --features dev` links Bevy dynamically for fast iteration.
 dev = ["bevy/dynamic_linking"]
 
+[lints]
+workspace = true
+
 [dependencies]
 hk_sim = { path = "../hk_sim" }
 bevy = { version = "0.18", default-features = false, features = ["3d", "bevy_gizmos"] }

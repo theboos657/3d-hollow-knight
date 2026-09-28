@@ -91,7 +91,9 @@ fn smoke_script(
     }
     let t = tick.0;
     input.set(Action::Right, (30..62).contains(&t), t + 1);
-    input.set(Action::Attack, (92..94).contains(&t), t + 1);
+    // Windows are wider than the most ticks a frame can advance (~3 on the CPU
+    // renderer), otherwise a frame could step right over a narrow one.
+    input.set(Action::Attack, (92..100).contains(&t), t + 1);
 
     if t >= 100 && shot_frame.is_none() {
         std::fs::create_dir_all("out").ok();

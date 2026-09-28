@@ -37,6 +37,11 @@ on a 2D gameplay plane with true 3D lighting, depth and parallax. Built in Rust 
 | Drop through a thin platform | Down + Jump | |
 | Debug overlay | F1 | |
 
+Useful options: `cargo play -- --room ID` starts in another room (rooms live in
+`assets/rooms/*.room.ron`; the default is `sandbox`). Feel numbers live in
+`assets/tuning/*.ron` and are read at startup, so you can tweak jump height, dash
+speed, camera lead and so on and just restart, with no rebuild.
+
 The sandbox unlocks everything: try the wall-jump shaft on the left, the thin
 platforms, and the spike pit on the right (pogo off the floating dummy to cross it).
 

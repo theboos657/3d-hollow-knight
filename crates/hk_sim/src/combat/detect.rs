@@ -5,8 +5,6 @@ use bevy_ecs::prelude::*;
 use super::*;
 use crate::components::SimPos;
 use crate::player::Facing;
-
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn detect_hits(
     mut hits: MessageWriter<Hit>,
     mut blocked: MessageWriter<Blocked>,

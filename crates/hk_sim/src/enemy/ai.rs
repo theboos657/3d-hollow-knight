@@ -69,8 +69,6 @@ fn walk(c: &Ctx, vel: &mut Velocity, dir: i8, speed: f32) {
         dir as f32 * speed
     };
 }
-
-#[allow(clippy::type_complexity)]
 pub fn enemy_ai(
     mut commands: Commands,
     tuning: Res<Tuning>,

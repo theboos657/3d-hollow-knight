@@ -34,8 +34,6 @@ pub fn nail_geometry(
         ),
     }
 }
-
-#[allow(clippy::type_complexity)]
 pub fn player_combat(
     mut commands: Commands,
     mut input: ResMut<InputState>,

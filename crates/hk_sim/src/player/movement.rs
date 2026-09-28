@@ -23,8 +23,6 @@ fn approach(v: f32, target: f32, max_delta: f32) -> f32 {
         (v - max_delta).max(target)
     }
 }
-
-#[allow(clippy::type_complexity)]
 pub fn player_movement(
     mut input: ResMut<InputState>,
     tick: Res<SimTick>,

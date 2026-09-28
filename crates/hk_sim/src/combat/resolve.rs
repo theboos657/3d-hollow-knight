@@ -7,9 +7,6 @@ use super::*;
 use crate::components::{SimPos, Velocity};
 use crate::player::{Motor, Player};
 use crate::tuning::Tuning;
-
-// Bevy system parameters are queries/resources, not ordinary arguments.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn resolve_hits(
     mut commands: Commands,
     mut hits: MessageReader<Hit>,

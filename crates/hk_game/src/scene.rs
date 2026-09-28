@@ -29,13 +29,9 @@ pub const CAM_DIST: f32 = 23.2;
 #[derive(Component)]
 pub struct MainCamera;
 
-/// Material handles shared by everything that draws.
+/// Materials for things that look the same in every theme (actors, effects).
 #[derive(Resource, Clone)]
 pub struct Palette {
-    pub stone: Handle<StandardMaterial>,
-    pub one_way: Handle<StandardMaterial>,
-    pub backdrop: Handle<StandardMaterial>,
-    pub glow: Handle<StandardMaterial>,
     pub player: Handle<StandardMaterial>,
     pub enemy: Handle<StandardMaterial>,
     pub hazard: Handle<StandardMaterial>,
@@ -45,18 +41,11 @@ pub struct Palette {
 }
 
 fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMaterial>>) {
-    let mut solid = |r: f32, g: f32, b: f32, rough: f32| {
-        mats.add(StandardMaterial {
-            base_color: Color::srgb(r, g, b),
-            perceptual_roughness: rough,
-            ..default()
-        })
-    };
-    let stone = solid(0.22, 0.25, 0.33, 0.9);
-    let one_way = solid(0.35, 0.3, 0.2, 0.8);
-    let backdrop = solid(0.1, 0.12, 0.2, 1.0);
-    let marker = solid(0.05, 0.05, 0.08, 0.5);
-
+    let marker = mats.add(StandardMaterial {
+        base_color: Color::srgb(0.05, 0.05, 0.08),
+        perceptual_roughness: 0.5,
+        ..default()
+    });
     let mut emissive = |base: Color, e: LinearRgba, alpha: f32| {
         mats.add(StandardMaterial {
             base_color: base.with_alpha(alpha),
@@ -70,11 +59,6 @@ fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMateria
             ..default()
         })
     };
-    let glow = emissive(
-        Color::srgb(0.2, 0.6, 0.9),
-        LinearRgba::rgb(0.6, 2.4, 4.0),
-        1.0,
-    );
     let player = emissive(
         Color::srgb(0.92, 0.94, 1.0),
         LinearRgba::rgb(0.1, 0.1, 0.16),
@@ -102,10 +86,6 @@ fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMateria
     );
 
     commands.insert_resource(Palette {
-        stone,
-        one_way,
-        backdrop,
-        glow,
         player,
         enemy,
         hazard,
@@ -150,10 +130,13 @@ fn spawn_camera_and_lights(mut commands: Commands) {
 }
 
 /// Layered background slabs and glowing motes across `width` world units.
-pub fn spawn_backdrop(
+/// Every spawned entity also gets `marker` so the caller can tear it down.
+pub fn spawn_backdrop<M: Bundle + Clone>(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    pal: &Palette,
+    backdrop: &Handle<StandardMaterial>,
+    glow: &Handle<StandardMaterial>,
+    marker: M,
     width: f32,
 ) {
     for (z, count, h) in [(-6.0, 12, 10.0), (-14.0, 10, 16.0), (-30.0, 8, 26.0)] {
@@ -162,8 +145,9 @@ pub fn spawn_backdrop(
             let x = -10.0 + t * (width + 20.0) + (i as f32 * 3.7).sin() * 3.0;
             let w = 4.0 + (i % 3) as f32 * 2.5;
             commands.spawn((
+                marker.clone(),
                 Mesh3d(meshes.add(Cuboid::new(w, h, 3.0))),
-                MeshMaterial3d(pal.backdrop.clone()),
+                MeshMaterial3d(backdrop.clone()),
                 Transform::from_xyz(x, h * 0.5 - 1.0, z),
             ));
         }
@@ -172,8 +156,9 @@ pub fn spawn_backdrop(
         let x = i as f32 * width / 13.0;
         let y = 4.0 + ((i * 7) % 11) as f32;
         commands.spawn((
+            marker.clone(),
             Mesh3d(meshes.add(Sphere::new(0.16))),
-            MeshMaterial3d(pal.glow.clone()),
+            MeshMaterial3d(glow.clone()),
             Transform::from_xyz(x, y, -4.0 - (i % 4) as f32 * 2.0),
         ));
     }

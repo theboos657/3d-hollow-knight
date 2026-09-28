@@ -13,6 +13,7 @@ pub struct Tuning {
     pub player: PlayerTuning,
     pub combat: CombatTuning,
     pub enemies: EnemyTuning,
+    pub camera: CameraTuning,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -141,6 +142,43 @@ impl PlayerTuning {
     }
     pub fn drop_through_ticks(&self) -> u32 {
         ms_to_ticks(self.drop_through_ms)
+    }
+}
+
+impl Tuning {
+    /// Loads `player.ron`, `combat.ron`, `enemies.ron` and `camera.ron` from
+    /// `dir`. A missing or broken file falls back to the built-in default for
+    /// that group and is reported in the returned warnings, so a typo while
+    /// tuning never stops the game from starting.
+    pub fn load_dir(dir: &std::path::Path) -> (Tuning, Vec<String>) {
+        fn load<T: serde::de::DeserializeOwned + Default>(
+            dir: &std::path::Path,
+            file: &str,
+            warnings: &mut Vec<String>,
+        ) -> T {
+            let path = dir.join(file);
+            match std::fs::read_to_string(&path) {
+                Ok(text) => match ron::from_str(&text) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warnings.push(format!("{}: {e} (using defaults)", path.display()));
+                        T::default()
+                    }
+                },
+                Err(e) => {
+                    warnings.push(format!("{}: {e} (using defaults)", path.display()));
+                    T::default()
+                }
+            }
+        }
+        let mut w = Vec::new();
+        let t = Tuning {
+            player: load(dir, "player.ron", &mut w),
+            combat: load(dir, "combat.ron", &mut w),
+            enemies: load(dir, "enemies.ron", &mut w),
+            camera: load(dir, "camera.ron", &mut w),
+        };
+        (t, w)
     }
 }
 
@@ -572,6 +610,65 @@ impl SpitterTuning {
     }
 }
 
+/// Camera rig feel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CameraTuning {
+    pub fov_deg: f32,
+    /// Distance from the z = 0 gameplay plane.
+    pub distance: f32,
+    /// Smoothing times (larger = lazier).
+    pub follow_x_ms: f32,
+    pub follow_y_ms: f32,
+    /// While airborne the camera ignores vertical movement inside +-this.
+    pub deadzone_half_y: f32,
+    /// Horizontal lead in the movement direction at full run speed.
+    pub lookahead: f32,
+    /// Moving the opposite way this long flips the lookahead.
+    pub lookahead_flip_ms: f32,
+    /// Holding up/down this long pans the camera.
+    pub look_hold_ms: f32,
+    pub look_dist: f32,
+    pub look_ease_ms: f32,
+    /// Falling faster than this starts pulling the view down.
+    pub fall_look_start: f32,
+    pub fall_look_max: f32,
+    pub shake_max: f32,
+    /// Trauma lost per second.
+    pub trauma_decay: f32,
+    /// Time to blend to a new room's bounds.
+    pub bounds_blend_ms: f32,
+}
+
+impl Default for CameraTuning {
+    fn default() -> Self {
+        Self {
+            fov_deg: 38.0,
+            distance: 23.2,
+            follow_x_ms: 120.0,
+            follow_y_ms: 250.0,
+            deadzone_half_y: 1.25,
+            lookahead: 3.5,
+            lookahead_flip_ms: 250.0,
+            look_hold_ms: 500.0,
+            look_dist: 4.0,
+            look_ease_ms: 300.0,
+            fall_look_start: 8.0,
+            fall_look_max: 3.5,
+            shake_max: 0.35,
+            trauma_decay: 1.5,
+            bounds_blend_ms: 400.0,
+        }
+    }
+}
+
+impl CameraTuning {
+    /// Half the visible height at the gameplay plane.
+    pub fn half_view_height(&self) -> f32 {
+        self.distance * (self.fov_deg.to_radians() * 0.5).tan()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -592,6 +689,32 @@ mod tests {
     }
 
     #[test]
+    fn load_dir_reads_the_shipped_files_without_warnings() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/tuning");
+        let (t, warnings) = Tuning::load_dir(&dir);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(t, Tuning::default());
+    }
+
+    #[test]
+    fn a_missing_or_broken_file_falls_back_and_warns() {
+        let dir = std::env::temp_dir().join(format!("hk_tuning_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("player.ron"), "(run_speed: 12.0)").unwrap(); // partial is fine
+        std::fs::write(dir.join("combat.ron"), "(nail_damage: oops)").unwrap(); // broken
+                                                                                // enemies.ron and camera.ron are missing
+        let (t, warnings) = Tuning::load_dir(&dir);
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(
+            t.player.run_speed, 12.0,
+            "partial files keep other fields at default"
+        );
+        assert_eq!(t.player.jump_height, PlayerTuning::default().jump_height);
+        assert_eq!(t.combat, CombatTuning::default(), "broken file -> defaults");
+        assert_eq!(warnings.len(), 3, "{warnings:?}");
+    }
+
+    #[test]
     fn combat_tick_conversions_match_plan() {
         let c = CombatTuning::default();
         assert_eq!(c.nail_startup_ticks(), 4);
@@ -599,6 +722,23 @@ mod tests {
         assert_eq!(c.nail_cooldown_ticks(), 42);
         assert_eq!(c.iframes_ticks(), 156);
         assert_eq!(c.focus_ticks(), 120);
+    }
+
+    #[test]
+    fn shipped_camera_ron_matches_defaults() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/tuning/camera.ron"
+        );
+        let text = std::fs::read_to_string(path).expect("assets/tuning/camera.ron exists");
+        let parsed: CameraTuning = ron::from_str(&text).expect("valid RON");
+        assert_eq!(parsed, CameraTuning::default());
+    }
+
+    #[test]
+    fn camera_view_is_about_16_units_tall() {
+        let h = CameraTuning::default().half_view_height() * 2.0;
+        assert!((h - 16.0).abs() < 0.2, "visible height {h}");
     }
 
     #[test]

@@ -1,0 +1,18 @@
+// Camera rig. Times in ms, distances in world units (1 tile).
+(
+    fov_deg: 38.0,
+    distance: 23.2,
+    follow_x_ms: 120.0,
+    follow_y_ms: 250.0,
+    deadzone_half_y: 1.25,
+    lookahead: 3.5,
+    lookahead_flip_ms: 250.0,
+    look_hold_ms: 500.0,
+    look_dist: 4.0,
+    look_ease_ms: 300.0,
+    fall_look_start: 8.0,
+    fall_look_max: 3.5,
+    shake_max: 0.35,
+    trauma_decay: 1.5,
+    bounds_blend_ms: 400.0,
+)
