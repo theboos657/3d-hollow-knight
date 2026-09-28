@@ -569,7 +569,7 @@ fn active_step(
             speed,
         } => {
             let interval = ms_to_ticks(interval_ms).max(1);
-            if b.waves_done < waves && (b.timer - 1) % interval == 0 {
+            if b.waves_done < waves && (b.timer - 1).is_multiple_of(interval) {
                 b.waves_done += 1;
                 for dir in [-1i8, 1] {
                     spawn_shockwave(

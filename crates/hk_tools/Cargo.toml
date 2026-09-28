@@ -2,6 +2,7 @@
 name = "hk_tools"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 description = "Developer tools: tuning dump, room lint, boss bot"
 
