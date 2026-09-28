@@ -94,6 +94,10 @@ impl PlayerBundle {
 pub fn spawn_player(world: &mut World, pos: Vec2, abilities: Abilities) -> Entity {
     let t = world.resource::<crate::tuning::Tuning>().player.clone();
     world
-        .spawn(PlayerBundle::new(pos, Vec2::new(t.half_w, t.half_h), abilities))
+        .spawn(PlayerBundle::new(
+            pos,
+            Vec2::new(t.half_w, t.half_h),
+            abilities,
+        ))
         .id()
 }

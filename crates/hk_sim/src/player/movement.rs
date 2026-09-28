@@ -8,7 +8,7 @@
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
-use super::{Abilities, Aabb, Facing, Motor, Player, PlayerState};
+use super::{Aabb, Abilities, Facing, Motor, Player, PlayerState};
 use crate::components::{SimPos, Velocity};
 use crate::input::{Action, InputState};
 use crate::tuning::Tuning;
@@ -128,9 +128,7 @@ pub fn player_movement(
             } else {
                 (p.air_accel(), p.air_decel())
             };
-            let carrying = axis != 0
-                && vel.x.signum() == axis as f32
-                && vel.x.abs() > p.run_speed;
+            let carrying = axis != 0 && vel.x.signum() == axis as f32 && vel.x.abs() > p.run_speed;
             if !carrying {
                 let reversing = vel.x != 0.0 && vel.x.signum() != axis as f32;
                 let rate = if axis == 0 || reversing { decel } else { accel };
@@ -163,11 +161,8 @@ pub fn player_movement(
 
             let mut v_old = vel.y;
             let mut v_new = (v_old - g * DT).max(-p.terminal_speed);
-            let sliding = abil.wall_grip
-                && !m.grounded
-                && m.wall != 0
-                && axis == m.wall
-                && v_new < 0.0;
+            let sliding =
+                abil.wall_grip && !m.grounded && m.wall != 0 && axis == m.wall && v_new < 0.0;
             if sliding {
                 v_old = v_old.max(-p.wall_slide_speed);
                 v_new = v_new.max(-p.wall_slide_speed);

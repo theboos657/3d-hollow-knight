@@ -165,7 +165,10 @@ mod tests {
     /// and the code can never silently drift apart.
     #[test]
     fn shipped_player_ron_matches_defaults() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/tuning/player.ron");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/tuning/player.ron"
+        );
         let text = std::fs::read_to_string(path).expect("assets/tuning/player.ron exists");
         let parsed: PlayerTuning = ron::from_str(&text).expect("valid RON");
         assert_eq!(parsed, PlayerTuning::default());

@@ -180,9 +180,7 @@ pub fn move_body(
                 let blocks = (i0..=i1).any(|i| match grid.get(i, j) {
                     Tile::Solid => true,
                     Tile::OneWay => {
-                        step.y < 0.0
-                            && !drop_through
-                            && prev_bottom >= (j + 1) as f32 - 2.0 * SKIN
+                        step.y < 0.0 && !drop_through && prev_bottom >= (j + 1) as f32 - 2.0 * SKIN
                     }
                     _ => false,
                 });

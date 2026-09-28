@@ -50,13 +50,25 @@ fn flat_scene(abil: Abilities) -> (Harness, Entity) {
     let rows = flat();
     let (mut h, e) = scene(&rows, Vec2::new(10.0, REST_Y), abil);
     h.tick_n(5); // settle
-    assert!(motor(&h, e).grounded, "player should start settled on the floor");
+    assert!(
+        motor(&h, e).grounded,
+        "player should start settled on the floor"
+    );
     (h, e)
 }
 
-const NONE: Abilities = Abilities { dash: false, wall_grip: false };
-const DASH: Abilities = Abilities { dash: true, wall_grip: false };
-const GRIP: Abilities = Abilities { dash: false, wall_grip: true };
+const NONE: Abilities = Abilities {
+    dash: false,
+    wall_grip: false,
+};
+const DASH: Abilities = Abilities {
+    dash: true,
+    wall_grip: false,
+};
+const GRIP: Abilities = Abilities {
+    dash: false,
+    wall_grip: true,
+};
 
 // ---------------------------------------------------------------- basics --
 
@@ -80,7 +92,10 @@ fn run_accelerates_to_full_speed_in_50ms() {
     h.tick_n(3);
     assert!((vel(&h, e).x - 9.0).abs() < 1e-3, "full speed after 50 ms");
     h.tick_n(30);
-    assert!((vel(&h, e).x - 9.0).abs() < 1e-3, "speed holds at run speed");
+    assert!(
+        (vel(&h, e).x - 9.0).abs() < 1e-3,
+        "speed holds at run speed"
+    );
 }
 
 #[test]
@@ -150,15 +165,25 @@ fn holding_jump_never_rejumps() {
 
 #[test]
 fn fall_speed_is_capped_at_terminal_velocity() {
+    // Fall gravity = 55.6 * 1.6 = 88.9 u/s^2, so terminal (24 u/s) is reached
+    // after ~32 ticks / 3.2 units. Start high enough to still be falling then.
     let rows = flat();
-    let (mut h, e) = scene(&rows, Vec2::new(10.0, 12.0), NONE);
+    let (mut h, e) = scene(&rows, Vec2::new(10.0, 13.0), NONE);
     let mut min_vy = 0.0f32;
-    for _ in 0..30 {
+    for i in 1..=50 {
         h.tick();
-        min_vy = min_vy.min(vel(&h, e).y);
+        let vy = vel(&h, e).y;
+        min_vy = min_vy.min(vy);
+        if i == 30 {
+            // Still accelerating: 88.9 * 0.25 s.
+            assert!((vy + 22.22).abs() < 0.05, "vy at 250 ms = {vy}");
+        }
     }
-    assert!(min_vy >= -t().terminal_speed - 1e-4);
-    assert!(min_vy <= -t().terminal_speed + 1.0, "should reach terminal, got {min_vy}");
+    assert!(
+        (min_vy + t().terminal_speed).abs() < 1e-4,
+        "speed must clamp to exactly -{}: got {min_vy}",
+        t().terminal_speed
+    );
 }
 
 // ----------------------------------------------------------- coyote time --
@@ -191,8 +216,14 @@ fn jump_k_ticks_after_leaving_ledge(k: u32) -> bool {
 fn coyote_jump_allowed_through_10_ticks_and_denied_at_11() {
     assert_eq!(t().coyote_ticks(), 10);
     assert!(jump_k_ticks_after_leaving_ledge(1));
-    assert!(jump_k_ticks_after_leaving_ledge(10), "10th airborne tick must still jump");
-    assert!(!jump_k_ticks_after_leaving_ledge(11), "11th airborne tick must not");
+    assert!(
+        jump_k_ticks_after_leaving_ledge(10),
+        "10th airborne tick must still jump"
+    );
+    assert!(
+        !jump_k_ticks_after_leaving_ledge(11),
+        "11th airborne tick must not"
+    );
 }
 
 // ----------------------------------------------------------- jump buffer --
@@ -232,8 +263,14 @@ fn buffered_jump_k_ticks_before_landing(k: u32) -> bool {
 fn jump_buffer_fires_within_12_ticks_and_expires_at_13() {
     let buf = t().jump_buffer_ticks();
     assert_eq!(buf, 12);
-    assert!(buffered_jump_k_ticks_before_landing(buf), "pressed 12 ticks early: jump");
-    assert!(!buffered_jump_k_ticks_before_landing(buf + 1), "13 ticks early: expired");
+    assert!(
+        buffered_jump_k_ticks_before_landing(buf),
+        "pressed 12 ticks early: jump"
+    );
+    assert!(
+        !buffered_jump_k_ticks_before_landing(buf + 1),
+        "13 ticks early: expired"
+    );
     assert!(buffered_jump_k_ticks_before_landing(1));
 }
 
@@ -250,7 +287,10 @@ fn ground_dash_covers_speed_times_duration() {
     h.tick_n(t().dash_ticks() - 1);
     let dist = pos(&h, e).x - x0;
     let expected = t().dash_speed * t().dash_ticks() as f32 / 120.0; // 4.0
-    assert!((dist - expected).abs() < 0.05, "dash distance {dist} vs {expected}");
+    assert!(
+        (dist - expected).abs() < 0.05,
+        "dash distance {dist} vs {expected}"
+    );
     assert_ne!(state(&h, e), PlayerState::Dash);
 }
 
@@ -274,7 +314,11 @@ fn dash_cooldown_blocks_a_second_dash_until_it_ends() {
     h.press(Action::Dash);
     h.tick();
     h.release(Action::Dash);
-    assert_ne!(state(&h, e), PlayerState::Dash, "cooldown must block the dash");
+    assert_ne!(
+        state(&h, e),
+        PlayerState::Dash,
+        "cooldown must block the dash"
+    );
     assert!((pos(&h, e).x - x_after).abs() < 2.0);
 
     // Wait out the cooldown (and the buffered press, which expires), then dash.
@@ -287,25 +331,38 @@ fn dash_cooldown_blocks_a_second_dash_until_it_ends() {
 #[test]
 fn dash_is_flat_and_air_dash_is_once_per_airtime() {
     let (mut h, e) = flat_scene(DASH);
+    // Full jump (jump stays held) and dash near the apex, so there is plenty of
+    // airtime left after the dash cooldown expires.
     h.press(Action::Jump);
-    h.tick_n(12);
-    h.release(Action::Jump);
+    h.tick_n(44);
     let y_before = pos(&h, e).y;
     h.press(Action::Dash);
     h.tick();
     h.release(Action::Dash);
     assert_eq!(state(&h, e), PlayerState::Dash);
     h.tick_n(t().dash_ticks() - 1);
-    assert!((pos(&h, e).y - y_before).abs() < 0.3, "no gravity during a dash");
+    assert!(
+        (pos(&h, e).y - y_before).abs() < 0.02,
+        "no gravity during a dash"
+    );
 
-    // Second air dash after the cooldown: denied.
-    h.tick_n(30);
-    if !motor(&h, e).grounded {
-        h.press(Action::Dash);
+    // Wait out the cooldown so only the air-dash rule can deny the next dash.
+    let mut guard = 0;
+    while motor(&h, e).dash_cooldown > 0 {
         h.tick();
-        assert_ne!(state(&h, e), PlayerState::Dash, "only one air dash per airtime");
-        h.release(Action::Dash);
+        guard += 1;
+        assert!(guard < 100);
     }
+    assert!(!motor(&h, e).grounded, "test setup: must still be airborne");
+    h.press(Action::Dash);
+    h.tick();
+    h.release(Action::Dash);
+    assert_ne!(
+        state(&h, e),
+        PlayerState::Dash,
+        "only one air dash per airtime"
+    );
+
     // Land, wait out the cooldown: refilled.
     while !motor(&h, e).grounded {
         h.tick();
@@ -362,7 +419,10 @@ fn wall_slide_caps_fall_speed_only_with_the_ability() {
             assert!(vy >= -t().wall_slide_speed - 1e-3, "slide speed {vy}");
             assert_eq!(state(&h, e), PlayerState::WallSlide);
         } else {
-            assert!(vy < -t().wall_slide_speed - 1.0, "falls freely without grip: {vy}");
+            assert!(
+                vy < -t().wall_slide_speed - 1.0,
+                "falls freely without grip: {vy}"
+            );
         }
     }
 }
@@ -417,7 +477,10 @@ fn down_plus_jump_drops_through_a_one_way() {
     let (mut h, e) = scene(&rows, Vec2::new(5.5, 7.0 + 0.75 + SKIN), NONE);
     h.tick_n(5);
     assert!(motor(&h, e).grounded);
-    assert!((pos(&h, e).y - (7.0 + 0.75 + SKIN)).abs() < 1e-3, "standing on the one-way");
+    assert!(
+        (pos(&h, e).y - (7.0 + 0.75 + SKIN)).abs() < 1e-3,
+        "standing on the one-way"
+    );
 
     h.press(Action::Down);
     h.press(Action::Jump);
@@ -425,7 +488,10 @@ fn down_plus_jump_drops_through_a_one_way() {
     h.release(Action::Jump);
     h.release(Action::Down);
     h.tick_n(90);
-    assert!((pos(&h, e).y - REST_Y).abs() < 1e-3, "ended on the floor below");
+    assert!(
+        (pos(&h, e).y - REST_Y).abs() < 1e-3,
+        "ended on the floor below"
+    );
 }
 
 fn ceiling_scene(corner_correction: f32) -> (Harness, Entity) {
@@ -448,8 +514,10 @@ fn ceiling_scene(corner_correction: f32) -> (Harness, Entity) {
     ];
     let mut h = Harness::new();
     h.world_mut().insert_resource(TileGrid::from_ascii(&rows));
-    h.world_mut().resource_mut::<hk_sim::tuning::Tuning>().player.corner_correction =
-        corner_correction;
+    h.world_mut()
+        .resource_mut::<hk_sim::tuning::Tuning>()
+        .player
+        .corner_correction = corner_correction;
     // Right edge of the player at x = 10.1: overlaps the block by 0.1.
     let e = spawn_player(h.world_mut(), Vec2::new(9.7, REST_Y), NONE);
     h.tick_n(5);
@@ -466,7 +534,10 @@ fn ceiling_corner_correction_slips_past_a_grazing_corner() {
         h.tick();
         max_dy = max_dy.max(pos(&h, e).y - y0);
     }
-    assert!(max_dy > 3.4, "corrected jump reaches full height, got {max_dy}");
+    assert!(
+        max_dy > 3.4,
+        "corrected jump reaches full height, got {max_dy}"
+    );
     assert!(pos(&h, e).x < 9.7 + 1e-3 && pos(&h, e).x > 9.7 - 0.3);
 }
 

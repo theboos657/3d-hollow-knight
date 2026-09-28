@@ -1,5 +1,7 @@
 //! Components shared by every simulated entity.
 
+use std::ops::{Deref, DerefMut};
+
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
@@ -15,6 +17,20 @@ pub struct PrevPos(pub Vec2);
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Velocity(pub Vec2);
+
+// `vel.x` / `vel.y` read better than `vel.0.x` in movement code.
+impl Deref for Velocity {
+    type Target = Vec2;
+    fn deref(&self) -> &Vec2 {
+        &self.0
+    }
+}
+
+impl DerefMut for Velocity {
+    fn deref_mut(&mut self) -> &mut Vec2 {
+        &mut self.0
+    }
+}
 
 /// Copies `SimPos` into `PrevPos` at the top of every tick.
 pub fn snapshot_prev(mut q: Query<(&SimPos, &mut PrevPos)>) {

@@ -36,8 +36,3 @@ fn interpolate(
         t.translation = Vec3::new(p.x, p.y, interp.z);
     }
 }
-
-/// Visual position of an interpolated entity this frame (used by the camera).
-pub fn visual_pos(fixed: &Time<Fixed>, pos: &SimPos, prev: &PrevPos) -> Vec2 {
-    prev.0.lerp(pos.0, fixed.overstep_fraction())
-}

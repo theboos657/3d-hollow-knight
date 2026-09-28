@@ -3,7 +3,7 @@
 
 use bevy_ecs::prelude::*;
 use rand_chacha::ChaCha8Rng;
-use rand_core::{RngCore, SeedableRng};
+use rand_core::{Rng, SeedableRng};
 
 #[derive(Resource, Clone, Debug)]
 pub struct SimRng(ChaCha8Rng);

@@ -52,19 +52,19 @@ impl Plugin for SimPlugin {
             .init_resource::<tuning::Tuning>()
             .init_resource::<world::TileGrid>()
             .configure_sets(
-            FixedUpdate,
-            (
-                SimSet::Input,
-                SimSet::Intent,
-                SimSet::Motion,
-                SimSet::Collision,
-                SimSet::HitDetect,
-                SimSet::HitResolve,
-                SimSet::Status,
-                SimSet::Cleanup,
-            )
-                .chain(),
-        );
+                FixedUpdate,
+                (
+                    SimSet::Input,
+                    SimSet::Intent,
+                    SimSet::Motion,
+                    SimSet::Collision,
+                    SimSet::HitDetect,
+                    SimSet::HitResolve,
+                    SimSet::Status,
+                    SimSet::Cleanup,
+                )
+                    .chain(),
+            );
         app.add_systems(FixedUpdate, advance_tick.before(SimSet::Input));
         app.add_systems(FixedUpdate, components::snapshot_prev.in_set(SimSet::Input));
         app.add_systems(FixedUpdate, player::player_movement.in_set(SimSet::Motion));
@@ -110,7 +110,10 @@ mod tests {
         app.add_plugins(SimPlugin)
             .add_message::<Ping>()
             .init_resource::<Seen>()
-            .add_systems(FixedUpdate, (send.in_set(SimSet::Intent), recv.in_set(SimSet::HitResolve)));
+            .add_systems(
+                FixedUpdate,
+                (send.in_set(SimSet::Intent), recv.in_set(SimSet::HitResolve)),
+            );
         for _ in 0..3 {
             app.world_mut().run_schedule(FixedUpdate);
         }

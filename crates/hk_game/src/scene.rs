@@ -19,7 +19,7 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(GlobalAmbientLight {
             color: Color::srgb(0.35, 0.42, 0.6),
-            brightness: 60.0,
+            brightness: 140.0,
             ..default()
         })
         .add_systems(Startup, spawn_greybox)
@@ -65,11 +65,11 @@ fn spawn_greybox(
 
     // Solid geometry on the gameplay lane (depth 4 u, centred on z = 0).
     let solids: &[(Vec2, Vec2)] = &[
-        (Vec2::new(0.0, -1.0), Vec2::new(40.0, 2.0)),   // floor
-        (Vec2::new(-8.0, 3.0), Vec2::new(5.0, 0.6)),    // ledge
-        (Vec2::new(7.0, 5.5), Vec2::new(6.0, 0.6)),     // high ledge
-        (Vec2::new(-19.5, 6.0), Vec2::new(1.0, 14.0)),  // left wall
-        (Vec2::new(19.5, 6.0), Vec2::new(1.0, 14.0)),   // right wall
+        (Vec2::new(0.0, -1.0), Vec2::new(40.0, 2.0)),  // floor
+        (Vec2::new(-8.0, 3.0), Vec2::new(5.0, 0.6)),   // ledge
+        (Vec2::new(7.0, 5.5), Vec2::new(6.0, 0.6)),    // high ledge
+        (Vec2::new(-19.5, 6.0), Vec2::new(1.0, 14.0)), // left wall
+        (Vec2::new(19.5, 6.0), Vec2::new(1.0, 14.0)),  // right wall
     ];
     for (c, size) in solids {
         commands.spawn((
@@ -108,7 +108,10 @@ fn spawn_greybox(
             SimPos(start),
             PrevPos(start),
             Velocity::default(),
-            Interpolated { z: 0.0, offset: Vec2::ZERO },
+            Interpolated {
+                z: 0.0,
+                offset: Vec2::ZERO,
+            },
             Mesh3d(meshes.add(Cuboid::new(0.8, 1.5, 0.8))),
             MeshMaterial3d(hero),
             Transform::from_xyz(start.x, start.y, 0.0),
@@ -150,7 +153,10 @@ fn spawn_greybox(
         Bloom::NATURAL,
         DistanceFog {
             color: Color::srgb(0.015, 0.02, 0.035),
-            falloff: FogFalloff::Linear { start: 22.0, end: 75.0 },
+            falloff: FogFalloff::Linear {
+                start: 22.0,
+                end: 75.0,
+            },
             ..default()
         },
     ));
