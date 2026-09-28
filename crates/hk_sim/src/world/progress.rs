@@ -31,6 +31,29 @@ impl Checkpoint {
     }
 }
 
+/// How the run is going (shown on the end screen, kept in the save).
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RunStats {
+    pub deaths: u32,
+    /// Simulation ticks played (hitstop and room fades excluded).
+    pub ticks: u64,
+}
+
+impl RunStats {
+    pub fn seconds(&self) -> f32 {
+        self.ticks as f32 / crate::TICK_HZ as f32
+    }
+}
+
+/// Counts deaths and time. Runs in `SimSet::Status`, so it pauses with the sim.
+pub fn track_stats(
+    mut stats: ResMut<RunStats>,
+    mut died: MessageReader<crate::combat::PlayerDied>,
+) {
+    stats.ticks += 1;
+    stats.deaths += died.read().count() as u32;
+}
+
 /// The player sat down at a bench (healed, respawn point set).
 #[derive(Message, Clone, Copy, Debug)]
 pub struct BenchRested;
@@ -186,6 +209,10 @@ pub struct SaveData {
     pub x: f32,
     pub y: f32,
     pub facing: i8,
+    #[serde(default)]
+    pub deaths: u32,
+    #[serde(default)]
+    pub play_ticks: u64,
 }
 
 impl SaveData {
@@ -203,6 +230,7 @@ impl SaveData {
         defeated.sort_unstable();
         collected.sort_unstable();
         let cp = world.resource::<Checkpoint>().clone();
+        let stats = *world.resource::<RunStats>();
         Self {
             version: SAVE_VERSION,
             dash: abil.dash,
@@ -213,6 +241,8 @@ impl SaveData {
             x: cp.pos.x,
             y: cp.pos.y,
             facing: cp.facing,
+            deaths: stats.deaths,
+            play_ticks: stats.ticks,
         }
     }
 
@@ -242,6 +272,10 @@ impl SaveData {
                 spawn_player(world, Vec2::ZERO, abilities);
             }
         }
+        *world.resource_mut::<RunStats>() = RunStats {
+            deaths: self.deaths,
+            ticks: self.play_ticks,
+        };
         let feet = Vec2::new(self.x, self.y);
         *world.resource_mut::<Checkpoint>() = Checkpoint {
             room: self.room.clone(),

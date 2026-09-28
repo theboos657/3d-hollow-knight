@@ -40,7 +40,7 @@ pub struct WorldViewPlugin;
 impl Plugin for WorldViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_fade)
-            .add_systems(PostStartup, start_game)
+            .add_systems(PostStartup, auto_start)
             .add_systems(
                 Update,
                 (rebuild_view, attach_props, update_fade, sandbox_respawn).after(RenderPrepSet),
@@ -136,9 +136,9 @@ fn style(t: Theme) -> ThemeStyle {
 
 // ---------------------------------------------------------------- starting --
 
-fn start_game(mut commands: Commands, mode: Res<StartMode>) {
-    let mode = mode.clone();
-    commands.queue(move |world: &mut World| match mode {
+/// Starts a game from the title screen (or straight away in dev runs).
+pub fn begin_game(world: &mut World, mode: StartMode) {
+    match mode {
         StartMode::Continue(save) => {
             if let Err(e) = save.apply(world) {
                 eprintln!("could not continue the saved game ({e}); starting a new one");
@@ -161,7 +161,16 @@ fn start_game(mut commands: Commands, mode: Res<StartMode>) {
             };
             begin(world, &room, &entry, abilities);
         }
-    });
+    }
+}
+
+/// Developer and scripted runs skip the title screen and start immediately.
+fn auto_start(mut commands: Commands, mode: Res<StartMode>, screen: Res<crate::menu::Screen>) {
+    if *screen != crate::menu::Screen::Playing {
+        return;
+    }
+    let mode = mode.clone();
+    commands.queue(move |world: &mut World| begin_game(world, mode));
 }
 
 /// Spawns the player and enters `room`; that entry point is also where dying

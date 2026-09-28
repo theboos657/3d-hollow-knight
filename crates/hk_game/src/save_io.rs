@@ -46,7 +46,7 @@ pub fn write(dir: &Path, data: &SaveData) {
 }
 
 #[derive(Resource)]
-struct SaveDir(PathBuf);
+pub struct SaveDir(pub PathBuf);
 
 pub struct SavePlugin {
     pub enabled: bool,

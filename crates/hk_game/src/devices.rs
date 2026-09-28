@@ -11,33 +11,26 @@ impl Plugin for DevicePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             RunFixedMainLoop,
-            sample_devices.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            sample_devices
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+                .run_if(crate::menu::is_playing),
         );
     }
 }
-
-const KEYS: &[(Action, &[KeyCode])] = &[
-    (Action::Left, &[KeyCode::ArrowLeft, KeyCode::KeyA]),
-    (Action::Right, &[KeyCode::ArrowRight, KeyCode::KeyD]),
-    (Action::Up, &[KeyCode::ArrowUp, KeyCode::KeyW]),
-    (Action::Down, &[KeyCode::ArrowDown, KeyCode::KeyS]),
-    (Action::Jump, &[KeyCode::Space, KeyCode::KeyZ]),
-    (Action::Attack, &[KeyCode::KeyX, KeyCode::KeyJ]),
-    (Action::Dash, &[KeyCode::KeyC, KeyCode::ShiftLeft]),
-    (Action::Focus, &[KeyCode::KeyF]),
-    (Action::Cast, &[KeyCode::KeyV]),
-];
 
 const STICK_DEADZONE: f32 = 0.4;
 
 fn sample_devices(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
+    settings: Res<crate::settings::Settings>,
     tick: Res<SimTick>,
     mut input: ResMut<InputState>,
 ) {
     let next = tick.0 + 1;
-    for (action, codes) in KEYS {
+    for action in Action::ALL {
+        let action = &action;
+        let codes = settings.key_codes(*action);
         let tapped = codes.iter().any(|k| keys.just_pressed(*k));
         let down = codes.iter().any(|k| keys.pressed(*k));
         // A press and release inside one frame leaves `pressed` false; latch

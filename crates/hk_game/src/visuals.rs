@@ -25,7 +25,6 @@ impl Plugin for VisualsPlugin {
                 attach_player_extras,
                 update_nose,
                 player_fx,
-                update_hud,
                 enemy_fx,
                 update_shield_plates,
                 room_banner,
@@ -256,25 +255,7 @@ fn player_fx(
 
 // -------------------------------------------------------------------- HUD --
 
-#[derive(Component)]
-struct Hud;
-
 fn spawn_hud(mut commands: Commands) {
-    commands.spawn((
-        Hud,
-        Text::new(""),
-        TextFont {
-            font_size: 20.0,
-            ..default()
-        },
-        TextColor(Color::srgb(0.95, 0.95, 1.0)),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(8.0),
-            right: Val::Px(14.0),
-            ..default()
-        },
-    ));
     // A full-width row centres the banner text (justify_content applies to a
     // node's children, not to the node's own text).
     commands
@@ -296,23 +277,6 @@ fn spawn_hud(mut commands: Commands) {
                 TextColor(Color::srgba(0.95, 0.93, 0.85, 0.0)),
             ));
         });
-    commands.spawn((
-        Text::new(
-            "Move: Arrows/WASD   Jump: Space/Z   Attack: X/J (+Up / +Down in air = pogo)\n\
-             Dash: C/Shift   Focus (hold, heals): F   Bolt: V   Down+Jump: drop through   F1: debug",
-        ),
-        TextFont {
-            font_size: 15.0,
-            ..default()
-        },
-        TextColor(Color::srgba(0.8, 0.85, 1.0, 0.75)),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(8.0),
-            left: Val::Px(10.0),
-            ..default()
-        },
-    ));
 }
 
 #[derive(Component)]
@@ -347,24 +311,4 @@ fn room_banner(
         .min((3.0 - banner.timer) * 2.0)
         .clamp(0.0, 1.0);
     color.0 = Color::srgba(0.95, 0.93, 0.85, a);
-}
-
-fn update_hud(
-    player: Query<(&Health, &Soul, &CombatState), With<Player>>,
-    mut hud: Query<&mut Text, With<Hud>>,
-) {
-    let (Ok((hp, soul, cs)), Ok(mut text)) = (player.single(), hud.single_mut()) else {
-        return;
-    };
-    let masks: String = (0..hp.max)
-        .map(|i| if i < hp.hp { '#' } else { '-' })
-        .collect();
-    let status = if cs.dead {
-        "  YOU DIED"
-    } else if cs.focusing {
-        "  focusing..."
-    } else {
-        ""
-    };
-    **text = format!("HP [{masks}]   SOUL {}/{}{status}", soul.value, soul.max);
 }

@@ -43,6 +43,7 @@ fn camera_rig(
     time: Res<Time>,
     tuning: Res<Tuning>,
     input: Res<InputState>,
+    settings: Res<crate::settings::Settings>,
     library: Res<RoomLibrary>,
     current: Res<CurrentRoom>,
     windows: Query<&Window, With<PrimaryWindow>>,
@@ -122,6 +123,11 @@ fn camera_rig(
         t,
         dt,
     );
-    let p = rig.0.pos() + rig.0.shake_offset(t);
+    let shake = if settings.shake {
+        rig.0.shake_offset(t)
+    } else {
+        Vec2::ZERO
+    };
+    let p = rig.0.pos() + shake;
     ct.translation = Vec3::new(p.x, p.y, t.distance);
 }

@@ -8,14 +8,18 @@
 //! `--boss-hp-pct N` (see demo.rs).
 
 mod assets;
+mod audio;
 mod boss_view;
 mod camera_rig;
 mod debug;
 mod demo;
 mod devices;
+mod hud;
 mod interp;
+mod menu;
 mod save_io;
 mod scene;
+mod settings;
 mod toast;
 mod vfx;
 mod visuals;
@@ -62,7 +66,12 @@ fn main() {
             _ => world_view::StartMode::New,
         },
     };
-    let autosave = !scripted && !matches!(start, world_view::StartMode::Dev { .. });
+    let dev_start = matches!(start, world_view::StartMode::Dev { .. });
+    let autosave = !scripted && !dev_start;
+    // Developer and scripted runs go straight into the game; everyone else
+    // gets the title screen.
+    let skip_title = (scripted || dev_start) && !args.iter().any(|a| a == "--title");
+    let settings = settings::load(&save_dir);
 
     // Tuning and rooms are plain files: edit and restart, no rebuild needed.
     let (tuning, warnings) = Tuning::load_dir(&assets_dir.join("tuning"));
@@ -81,21 +90,34 @@ fn main() {
     }
 
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "Hollow Knight 3D".into(),
-            present_mode: PresentMode::AutoVsync,
-            resolution: (1280, 720).into(),
-            ..default()
-        }),
-        ..default()
-    }))
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Hollow Toll".into(),
+                    present_mode: if settings.vsync {
+                        PresentMode::AutoVsync
+                    } else {
+                        PresentMode::AutoNoVsync
+                    },
+                    resolution: (1280, 720).into(),
+                    ..default()
+                }),
+                ..default()
+            })
+            // Sounds live next to the tuning and rooms.
+            .set(AssetPlugin {
+                file_path: assets_dir.to_string_lossy().into_owned(),
+                ..default()
+            }),
+    )
     .insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
     .insert_resource(ClearColor(Color::srgb(0.015, 0.02, 0.035)))
     // Inserted before SimPlugin so its `init_resource` keeps ours.
     .insert_resource(tuning)
     .insert_resource(library)
     .insert_resource(start)
+    .insert_resource(settings)
     .add_plugins((
         SimPlugin,
         interp::InterpPlugin,
@@ -106,6 +128,9 @@ fn main() {
         vfx::VfxPlugin,
         boss_view::BossViewPlugin,
         toast::ToastPlugin,
+        hud::HudPlugin,
+        audio::AudioPlugin,
+        menu::MenuPlugin { skip_title },
         save_io::SavePlugin {
             enabled: autosave,
             dir: save_dir,

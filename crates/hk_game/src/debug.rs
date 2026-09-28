@@ -40,6 +40,8 @@ fn spawn_overlay(mut commands: Commands) {
             left: Val::Px(10.0),
             ..default()
         },
+        // F1 shows it.
+        Visibility::Hidden,
     ));
 }
 

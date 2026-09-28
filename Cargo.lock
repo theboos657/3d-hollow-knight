@@ -2855,6 +2855,8 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "hk_sim",
+ "ron",
+ "serde",
 ]
 
 [[package]]
@@ -2880,6 +2882,12 @@ dependencies = [
  "ron",
  "serde",
 ]
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "image"
@@ -4187,6 +4195,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7ceb6607dd738c99bc8cb28eff249b7cd5c8ec88b9db96c0608c1480d140fb1"
 dependencies = [
  "cpal",
+ "hound",
  "lewton",
 ]
 

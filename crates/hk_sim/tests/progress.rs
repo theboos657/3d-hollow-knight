@@ -430,3 +430,40 @@ fn a_save_from_another_version_is_refused_not_misread() {
     assert!(s.apply(h.world_mut()).is_err());
     assert!(SaveData::from_ron("(nonsense").is_err());
 }
+
+#[test]
+fn deaths_and_play_time_are_counted_and_saved() {
+    let (mut h, p) = world_of(vec![bench_room()], NONE);
+    enter_room(h.world_mut(), "A", "here").unwrap();
+    h.tick_n(120);
+    assert_eq!(h.world().resource::<RunStats>().deaths, 0);
+    let secs = h.world().resource::<RunStats>().seconds();
+    assert!(
+        (0.9..=1.1).contains(&secs),
+        "120 ticks is one second, got {secs}"
+    );
+    // Die twice (the real damage path sends PlayerDied).
+    for _ in 0..2 {
+        h.world_mut()
+            .resource_mut::<Messages<hk_sim::combat::PlayerDied>>()
+            .write(hk_sim::combat::PlayerDied);
+        h.tick();
+    }
+    let _ = p;
+    assert_eq!(h.world().resource::<RunStats>().deaths, 2);
+
+    let saved = SaveData::capture(h.world_mut());
+    assert_eq!(saved.deaths, 2);
+    assert!(saved.play_ticks >= 120);
+    let mut h2 = Harness::new();
+    h2.world_mut()
+        .insert_resource(RoomLibrary::from_defs(vec![bench_room()]));
+    SaveData {
+        room: "A".into(),
+        ..saved.clone()
+    }
+    .apply(h2.world_mut())
+    .unwrap();
+    assert_eq!(h2.world().resource::<RunStats>().deaths, 2);
+    assert_eq!(h2.world().resource::<RunStats>().ticks, saved.play_ticks);
+}

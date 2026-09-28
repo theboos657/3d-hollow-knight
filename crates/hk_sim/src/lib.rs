@@ -71,6 +71,7 @@ impl Plugin for SimPlugin {
             .init_resource::<world::room::WorldFlags>()
             .init_resource::<world::room::Transition>()
             .init_resource::<world::progress::Checkpoint>()
+            .init_resource::<world::progress::RunStats>()
             .add_message::<world::progress::BenchRested>()
             .add_message::<world::progress::AbilityGained>()
             .add_message::<world::room::RoomEntered>()
@@ -149,6 +150,7 @@ impl Plugin for SimPlugin {
                     boss::ai::update_arena_lock,
                     boss::ai::record_boss_defeat,
                     world::progress::bench_rest,
+                    world::progress::track_stats,
                     world::progress::collect_pickups,
                     world::progress::boss_rewards.after(boss::ai::record_boss_defeat),
                     world::progress::respawn_at_checkpoint.after(combat::status::player_status),
