@@ -1,7 +1,8 @@
 //! Hollow Knight 3D — game binary. Rendering, camera, audio and UI live here;
 //! all gameplay decisions live in `hk_sim`.
 //!
-//! Options: `--room ID` (default `sandbox`), `--entry NAME` (default `start`),
+//! Options: `--room ID` / `--entry NAME` (developer start, nothing is saved; add
+//! `--all` to unlock every move), `--new` (ignore the save),
 //! `--smoke-test` (scripted headless run that saves `out/smoke.png`),
 //! `--bot` (the boss-fight bot plays), `--shots moment,...` and
 //! `--boss-hp-pct N` (see demo.rs).
@@ -13,7 +14,9 @@ mod debug;
 mod demo;
 mod devices;
 mod interp;
+mod save_io;
 mod scene;
+mod toast;
 mod vfx;
 mod visuals;
 mod world_view;
@@ -38,13 +41,30 @@ fn main() {
         .map(|v| v.split(',').map(str::to_owned).collect())
         .unwrap_or_default();
     let boss_hp_pct = value_of("--boss-hp-pct").and_then(|v| v.parse::<f32>().ok());
-    let start = world_view::StartRoom {
-        room: value_of("--room").unwrap_or_else(|| "sandbox".into()),
-        entry: value_of("--entry").unwrap_or_else(|| "start".into()),
+    let dev_room = value_of("--room");
+    let assets_dir = assets::find_assets_dir();
+    let save_dir = save_io::save_dir(&assets_dir);
+    // A developer start (--room) never touches the save; otherwise continue
+    // the saved game unless --new asks for a fresh one.
+    // Scripted runs (smoke test, bot demo, screenshots) never read or write a save.
+    let scripted = smoke || bot || !shots.is_empty();
+    let start = match dev_room {
+        Some(room) => world_view::StartMode::Dev {
+            room,
+            entry: value_of("--entry").unwrap_or_else(|| "start".into()),
+            all: args.iter().any(|a| a == "--all"),
+        },
+        None => match (
+            scripted || args.iter().any(|a| a == "--new"),
+            save_io::load(&save_dir),
+        ) {
+            (false, Some(save)) => world_view::StartMode::Continue(save),
+            _ => world_view::StartMode::New,
+        },
     };
+    let autosave = !scripted && !matches!(start, world_view::StartMode::Dev { .. });
 
     // Tuning and rooms are plain files: edit and restart, no rebuild needed.
-    let assets_dir = assets::find_assets_dir();
     let (tuning, warnings) = Tuning::load_dir(&assets_dir.join("tuning"));
     for w in warnings {
         eprintln!("tuning warning: {w}");
@@ -85,8 +105,14 @@ fn main() {
         camera_rig::CameraRigPlugin,
         vfx::VfxPlugin,
         boss_view::BossViewPlugin,
+        toast::ToastPlugin,
+        save_io::SavePlugin {
+            enabled: autosave,
+            dir: save_dir,
+        },
         debug::DebugPlugin { smoke },
         demo::DemoPlugin {
+            prefix: value_of("--shot-prefix").unwrap_or_default(),
             bot,
             shots,
             boss_hp_pct,

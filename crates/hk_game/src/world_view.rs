@@ -2,22 +2,38 @@
 //! (exits, benches, pickups), the fade overlay for room changes, starting the
 //! game, and the sandbox's convenience respawn.
 
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::pbr::DistanceFog;
 use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use hk_sim::combat::EnemyDied;
 use hk_sim::player::{spawn_player, Abilities};
 use hk_sim::world::grid::Tile;
+use hk_sim::world::progress::{Checkpoint, SaveData};
 use hk_sim::world::room::*;
 
 use crate::interp::RenderPrepSet;
 use crate::scene::{spawn_backdrop, MainCamera};
 
-/// Which room to start in (`--room ID`, default `sandbox`).
+/// How the game begins.
 #[derive(Resource, Clone)]
-pub struct StartRoom {
-    pub room: String,
-    pub entry: String,
+pub enum StartMode {
+    /// Pick up a saved game at its last bench.
+    Continue(SaveData),
+    /// A fresh game in the first room, with no abilities.
+    New,
+    /// Developer start (`--room ID`): straight into a room. The sandbox (and
+    /// `--all`) unlock every move; nothing is saved.
+    Dev {
+        room: String,
+        entry: String,
+        all: bool,
+    },
 }
+
+/// The room a new game starts in.
+pub const FIRST_ROOM: (&str, &str) = ("A1", "start");
 
 pub struct WorldViewPlugin;
 
@@ -120,24 +136,134 @@ fn style(t: Theme) -> ThemeStyle {
 
 // ---------------------------------------------------------------- starting --
 
-fn start_game(mut commands: Commands, start: Res<StartRoom>) {
-    let (room, entry) = (start.room.clone(), start.entry.clone());
-    commands.queue(move |world: &mut World| {
-        let theme = world.resource::<RoomLibrary>().get(&room).map(|d| d.theme);
-        // The sandbox unlocks every move; real progression comes from pickups.
-        let abilities = if theme == Some(Theme::Sandbox) {
-            Abilities {
-                dash: true,
-                wall_grip: true,
+fn start_game(mut commands: Commands, mode: Res<StartMode>) {
+    let mode = mode.clone();
+    commands.queue(move |world: &mut World| match mode {
+        StartMode::Continue(save) => {
+            if let Err(e) = save.apply(world) {
+                eprintln!("could not continue the saved game ({e}); starting a new one");
+                begin(world, FIRST_ROOM.0, FIRST_ROOM.1, Abilities::default());
             }
-        } else {
-            Abilities::default()
-        };
-        spawn_player(world, bevy::math::Vec2::ZERO, abilities);
-        if let Err(e) = enter_room(world, &room, &entry) {
-            eprintln!("could not enter start room: {e}");
+        }
+        StartMode::New => begin(world, FIRST_ROOM.0, FIRST_ROOM.1, Abilities::default()),
+        StartMode::Dev { room, entry, all } => {
+            let sandbox = world
+                .resource::<RoomLibrary>()
+                .get(&room)
+                .is_some_and(|d| d.theme == Theme::Sandbox);
+            let abilities = if all || sandbox {
+                Abilities {
+                    dash: true,
+                    wall_grip: true,
+                }
+            } else {
+                Abilities::default()
+            };
+            begin(world, &room, &entry, abilities);
         }
     });
+}
+
+/// Spawns the player and enters `room`; that entry point is also where dying
+/// brings you back until you find a bench.
+fn begin(world: &mut World, room: &str, entry: &str, abilities: Abilities) {
+    spawn_player(world, bevy::math::Vec2::ZERO, abilities);
+    let spot = world
+        .resource::<RoomLibrary>()
+        .get(room)
+        .and_then(|d| d.entry(entry).cloned());
+    if let Some(e) = spot {
+        *world.resource_mut::<Checkpoint>() = Checkpoint {
+            room: room.to_string(),
+            pos: bevy::math::Vec2::new(e.at.0, e.at.1),
+            facing: e.facing,
+        };
+    }
+    if let Err(e) = enter_room(world, room, entry) {
+        eprintln!("could not enter start room: {e}");
+    }
+}
+
+// ------------------------------------------------------------- stone look --
+
+/// A small brick pattern (2 bricks wide, 4 rows) that tiles, so a wall reads
+/// as made of tiles at the size the player moves in, not as one flat plane.
+fn stone_texture(images: &mut Assets<Image>) -> Handle<Image> {
+    const N: usize = 64;
+    let hash = |a: u32, b: u32| -> f32 {
+        let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA6B);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2C1B_3C6D);
+        h ^= h >> 12;
+        (h & 0xFFFF) as f32 / 65535.0
+    };
+    let mut data = Vec::with_capacity(N * N * 4);
+    for y in 0..N {
+        for x in 0..N {
+            let row = y / 16;
+            let off = if row % 2 == 0 { 0 } else { 16 };
+            let (bx, by) = ((x + off) % 32, y % 16);
+            let brick = hash(row as u32, ((x + off) / 32) as u32);
+            let shade = if bx < 2 || by < 2 {
+                0.42
+            } else {
+                0.72 + 0.3 * brick + 0.06 * (hash(x as u32, y as u32) - 0.5)
+            };
+            let v = (shade.clamp(0.0, 1.0) * 255.0) as u8;
+            data.extend([v, v, v, 255]);
+        }
+    }
+    let mut img = Image::new(
+        Extent3d {
+            width: N as u32,
+            height: N as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    img.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        ..default()
+    });
+    images.add(img)
+}
+
+/// A cuboid whose texture coordinates repeat once per two tiles, whatever its size.
+fn tiled_cuboid(w: f32, h: f32, d: f32) -> Mesh {
+    let mut mesh = Mesh::from(Cuboid::new(w, h, d));
+    let normals: Vec<[f32; 3]> = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+        Some(bevy::mesh::VertexAttributeValues::Float32x3(n)) => n.clone(),
+        _ => return mesh,
+    };
+    if let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_UV_0)
+    {
+        for (uv, n) in uvs.iter_mut().zip(normals) {
+            let (su, sv) = if n[2].abs() > 0.5 {
+                (w, h)
+            } else if n[0].abs() > 0.5 {
+                (d, h)
+            } else {
+                (w, d)
+            };
+            uv[0] *= su * 0.5;
+            uv[1] *= sv * 0.5;
+        }
+    }
+    mesh
+}
+
+fn scaled(c: Color, k: f32) -> Color {
+    let s = c.to_srgba();
+    Color::srgb(
+        (s.red * k).min(1.0),
+        (s.green * k).min(1.0),
+        (s.blue * k).min(1.0),
+    )
 }
 
 // -------------------------------------------------------------------- view --
@@ -149,6 +275,7 @@ fn rebuild_view(
     old: Query<Entity, With<RoomVisual>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut fog: Query<&mut DistanceFog, With<MainCamera>>,
@@ -176,9 +303,22 @@ fn rebuild_view(
         perceptual_roughness: rough,
         ..default()
     };
-    let stone = mats.add(solid(st.stone, 0.9));
-    let one_way = mats.add(solid(st.one_way, 0.8));
-    let backdrop = mats.add(solid(st.backdrop, 1.0));
+    let brick = stone_texture(&mut images);
+    let stone = mats.add(StandardMaterial {
+        base_color: scaled(st.stone, 1.5),
+        base_color_texture: Some(brick),
+        perceptual_roughness: 0.9,
+        ..default()
+    });
+    // A lighter lip along every walkable surface, so ledges read at a glance.
+    let rim = mats.add(StandardMaterial {
+        base_color: scaled(st.stone, 2.6),
+        emissive: LinearRgba::rgb(0.03, 0.03, 0.03),
+        perceptual_roughness: 0.7,
+        ..default()
+    });
+    let one_way = mats.add(solid(scaled(st.one_way, 1.5), 0.8));
+    let backdrop = mats.add(solid(scaled(st.backdrop, 0.6), 1.0));
     let glow = mats.add(StandardMaterial {
         base_color: st.glow,
         emissive: st.glow_emissive,
@@ -203,11 +343,38 @@ fn rebuild_view(
                 Tile::OneWay => (0.25, 0.875, one_way.clone()),
                 _ => (1.0, 0.5, stone.clone()),
             };
+            let mesh = if t == Tile::Solid {
+                tiled_cuboid(w, h, 4.0)
+            } else {
+                Mesh::from(Cuboid::new(w, h, 4.0))
+            };
             commands.spawn((
                 RoomVisual,
-                Mesh3d(meshes.add(Cuboid::new(w, h, 4.0))),
+                Mesh3d(meshes.add(mesh)),
                 MeshMaterial3d(mat),
                 Transform::from_xyz(start as f32 + w * 0.5, j as f32 + y_off, 0.0),
+            ));
+        }
+    }
+    // Rims: runs of solid tiles with open air above.
+    for j in 0..grid.height() {
+        let exposed = |i: i32| grid.get(i, j) == Tile::Solid && grid.get(i, j + 1) != Tile::Solid;
+        let mut i = 0;
+        while i < grid.width() {
+            if !exposed(i) {
+                i += 1;
+                continue;
+            }
+            let start = i;
+            while i < grid.width() && exposed(i) {
+                i += 1;
+            }
+            let w = (i - start) as f32;
+            commands.spawn((
+                RoomVisual,
+                Mesh3d(meshes.add(Cuboid::new(w, 0.14, 4.04))),
+                MeshMaterial3d(rim.clone()),
+                Transform::from_xyz(start as f32 + w * 0.5, j as f32 + 0.93, 0.0),
             ));
         }
     }

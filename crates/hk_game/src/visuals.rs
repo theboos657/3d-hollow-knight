@@ -327,14 +327,18 @@ fn room_banner(
     library: Res<RoomLibrary>,
     current: Res<CurrentRoom>,
     mut q: Query<(&mut Text, &mut TextColor, &mut RoomBanner)>,
+    mut last: Local<String>,
 ) {
     let Ok((mut text, mut color, mut banner)) = q.single_mut() else {
         return;
     };
-    if entered.read().count() > 0 {
+    // Announce a room when you arrive in it, not when it merely reloads
+    // (resting at a bench, coming back after a death).
+    if entered.read().count() > 0 && *last != current.id {
         if let Some(def) = library.get(&current.id) {
             **text = def.name.to_uppercase();
             banner.timer = 3.0;
+            *last = current.id.clone();
         }
     }
     banner.timer = (banner.timer - time.delta_secs()).max(0.0);

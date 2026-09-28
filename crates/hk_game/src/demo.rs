@@ -5,7 +5,8 @@
 //! later phases quickly).
 //!
 //! Moments: intro, telegraph, active, recover, transition, glyph, pendulum,
-//! dying. Files land in `out/shot_<moment>.png`.
+//! dying; any other name just waits for the room to settle (`--shots room`).
+//! Files land in `out/shot_<moment>.png` (`--shot-prefix P_` adds a prefix).
 
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
@@ -16,6 +17,7 @@ use hk_sim::input::{apply_bits, InputState};
 use hk_sim::{advance_tick, SimTick};
 
 pub struct DemoPlugin {
+    pub prefix: String,
     pub bot: bool,
     pub shots: Vec<String>,
     pub boss_hp_pct: Option<f32>,
@@ -23,6 +25,7 @@ pub struct DemoPlugin {
 
 #[derive(Resource)]
 struct Demo {
+    prefix: String,
     pending: Vec<String>,
     hp_pct: Option<f32>,
 }
@@ -30,6 +33,7 @@ struct Demo {
 impl Plugin for DemoPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Demo {
+            prefix: self.prefix.clone(),
             pending: self.shots.clone(),
             hp_pct: self.boss_hp_pct,
         });
@@ -106,13 +110,13 @@ fn take_shots(
             "dying" => in_state(BossState::Dying, 60),
             "glyph" => glyphs.iter().any(|g| g.ticks < 50),
             "pendulum" => pendulums.iter().next().is_some(),
-            _ => true,
+            _ => *frames > 45,
         };
         if ready {
             std::fs::create_dir_all("out").ok();
             commands
                 .spawn(Screenshot::primary_window())
-                .observe(save_to_disk(format!("out/shot_{name}.png")));
+                .observe(save_to_disk(format!("out/{}shot_{name}.png", demo.prefix)));
             taken.push(name.clone());
             *last_shot = *frames;
         }
