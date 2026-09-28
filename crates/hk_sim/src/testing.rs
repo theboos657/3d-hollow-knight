@@ -2,6 +2,7 @@
 //! Used by unit tests, replay tests and the `hk_tools` bots.
 
 use bevy_app::{App, FixedUpdate};
+use bevy_ecs::message::Messages;
 use bevy_ecs::prelude::*;
 
 use crate::input::{Action, InputState};
@@ -46,6 +47,15 @@ impl Harness {
         for _ in 0..n {
             self.tick();
         }
+    }
+
+    /// Removes and returns every message of type `M` written since the last
+    /// call (headless runs never advance Bevy's frame-based message buffers).
+    pub fn drain_messages<M: Message>(&mut self) -> Vec<M> {
+        self.world_mut()
+            .resource_mut::<Messages<M>>()
+            .drain()
+            .collect()
     }
 
     /// Latches a device change so the *next* tick sees it (age 0 for presses).

@@ -9,6 +9,7 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
 use super::{Aabb, Abilities, Facing, Motor, Player, PlayerState};
+use crate::combat::CombatState;
 use crate::components::{SimPos, Velocity};
 use crate::input::{Action, InputState};
 use crate::tuning::Tuning;
@@ -38,6 +39,7 @@ pub fn player_movement(
             &mut PlayerState,
             &mut Facing,
             &Abilities,
+            &CombatState,
         ),
         With<Player>,
     >,
@@ -46,7 +48,14 @@ pub fn player_movement(
     let now = tick.0;
     let jump_buf = p.jump_buffer_ticks();
 
-    for (mut pos, mut vel, aabb, mut m, mut state, mut facing, abil) in &mut q {
+    for (mut pos, mut vel, aabb, mut m, mut state, mut facing, abil, cs) in &mut q {
+        // Dead: hold still until the respawn logic moves us.
+        if cs.dead {
+            vel.0 = Vec2::ZERO;
+            *state = PlayerState::Dead;
+            continue;
+        }
+        let can_act = cs.stun == 0;
         let half = aabb.half;
         let axis = input.axis_x();
 
@@ -56,7 +65,8 @@ pub fn player_movement(
         m.drop_through = m.drop_through.saturating_sub(1);
 
         // ---- drop through a one-way platform (Down + Jump) ----
-        if m.grounded
+        if can_act
+            && m.grounded
             && input.axis_y() < 0
             && input.buffered(Action::Jump, now, jump_buf)
             && !grid.overlaps(pos.0 - Vec2::new(0.0, 0.01), half, Tile::Solid)
@@ -69,7 +79,8 @@ pub fn player_movement(
 
         // ---- start a dash ----
         let dashing_now = m.dash_ticks_left > 0;
-        if abil.dash
+        if can_act
+            && abil.dash
             && !dashing_now
             && m.dash_cooldown == 0
             && (m.grounded || m.air_dash_ready)
@@ -88,7 +99,7 @@ pub fn player_movement(
 
         // ---- jump ----
         let can_ground_jump = m.grounded || m.coyote > 0;
-        if input.buffered(Action::Jump, now, jump_buf) {
+        if can_act && input.buffered(Action::Jump, now, jump_buf) {
             if can_ground_jump {
                 input.consume(Action::Jump, now, jump_buf);
                 vel.y = p.jump_velocity();
@@ -118,7 +129,13 @@ pub fn player_movement(
         let dashing = m.dash_ticks_left > 0;
         if dashing {
             vel.x = m.dash_dir as f32 * p.dash_speed;
-        } else if m.wall_lock == 0 {
+        } else if cs.focusing || (cs.cast_lock > 0 && m.grounded) {
+            // Planted: focusing or casting on the ground.
+            vel.x = approach(vel.x, 0.0, p.ground_decel() * DT);
+        } else if cs.stun > 0 {
+            // Hurt: keep the knockback, bleed it off slowly.
+            vel.x = approach(vel.x, 0.0, p.ground_decel() * 0.25 * DT);
+        } else if m.wall_lock == 0 && cs.control_lock == 0 {
             if axis != 0 {
                 facing.0 = axis;
             }
@@ -227,7 +244,11 @@ pub fn player_movement(
             m.jumping = false;
         }
 
-        *state = if m.dash_ticks_left > 0 {
+        *state = if cs.stun > 0 {
+            PlayerState::Hurt
+        } else if cs.focusing {
+            PlayerState::Focus
+        } else if m.dash_ticks_left > 0 {
             PlayerState::Dash
         } else if m.grounded {
             PlayerState::Grounded

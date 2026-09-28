@@ -3,7 +3,9 @@
 use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
+use crate::combat::{CombatState, Health, Hurtbox, SafeGround, Soul, Team};
 use crate::components::{PrevPos, SimPos, Velocity};
+use crate::tuning::Tuning;
 
 pub mod movement;
 
@@ -12,11 +14,7 @@ pub use movement::player_movement;
 #[derive(Component, Default)]
 pub struct Player;
 
-/// Axis-aligned movement box, centred on `SimPos`.
-#[derive(Component, Clone, Copy, Debug)]
-pub struct Aabb {
-    pub half: Vec2,
-}
+pub use crate::components::Aabb;
 
 /// Locomotion state, derived every tick from [`Motor`] (drives animation/VFX).
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +23,9 @@ pub enum PlayerState {
     Airborne,
     WallSlide,
     Dash,
+    Focus,
+    Hurt,
+    Dead,
 }
 
 /// Which way the player faces: +1 right, -1 left.
@@ -72,32 +73,49 @@ pub struct PlayerBundle {
     pub facing: Facing,
     pub abilities: Abilities,
     pub motor: Motor,
+    pub health: Health,
+    pub soul: Soul,
+    pub hurtbox: Hurtbox,
+    pub combat: CombatState,
+    pub safe: SafeGround,
 }
 
 impl PlayerBundle {
-    pub fn new(pos: Vec2, half: Vec2, abilities: Abilities) -> Self {
+    pub fn new(pos: Vec2, tuning: &Tuning, abilities: Abilities) -> Self {
+        let p = &tuning.player;
+        let c = &tuning.combat;
         Self {
             player: Player,
             pos: SimPos(pos),
             prev: PrevPos(pos),
             vel: Velocity::default(),
-            aabb: Aabb { half },
+            aabb: Aabb {
+                half: Vec2::new(p.half_w, p.half_h),
+            },
             state: PlayerState::Airborne,
             facing: Facing(1),
             abilities,
             motor: Motor::default(),
+            health: Health::full(c.max_masks),
+            soul: Soul {
+                value: 0,
+                max: c.soul_max,
+            },
+            hurtbox: Hurtbox {
+                half: Vec2::new(c.hurtbox.0, c.hurtbox.1),
+                team: Team::Player,
+            },
+            combat: CombatState::default(),
+            safe: SafeGround {
+                pos,
+                stable_ticks: 0,
+            },
         }
     }
 }
 
-/// Spawns a player with the default box from tuning.
+/// Spawns a player using the current tuning.
 pub fn spawn_player(world: &mut World, pos: Vec2, abilities: Abilities) -> Entity {
-    let t = world.resource::<crate::tuning::Tuning>().player.clone();
-    world
-        .spawn(PlayerBundle::new(
-            pos,
-            Vec2::new(t.half_w, t.half_h),
-            abilities,
-        ))
-        .id()
+    let bundle = PlayerBundle::new(pos, world.resource::<Tuning>(), abilities);
+    world.spawn(bundle).id()
 }

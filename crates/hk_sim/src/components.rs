@@ -32,6 +32,12 @@ impl DerefMut for Velocity {
     }
 }
 
+/// Axis-aligned box, centred on `SimPos`, used for terrain collision.
+#[derive(Component, Clone, Copy, Debug)]
+pub struct Aabb {
+    pub half: Vec2,
+}
+
 /// Copies `SimPos` into `PrevPos` at the top of every tick.
 pub fn snapshot_prev(mut q: Query<(&SimPos, &mut PrevPos)>) {
     for (pos, mut prev) in &mut q {

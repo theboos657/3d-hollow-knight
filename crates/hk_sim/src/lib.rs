@@ -6,6 +6,7 @@
 use bevy_app::{App, FixedUpdate, Plugin};
 use bevy_ecs::prelude::*;
 
+pub mod combat;
 pub mod components;
 pub mod input;
 pub mod player;
@@ -51,6 +52,13 @@ impl Plugin for SimPlugin {
             .init_resource::<rng::SimRng>()
             .init_resource::<tuning::Tuning>()
             .init_resource::<world::TileGrid>()
+            .init_resource::<combat::HitStop>()
+            .init_resource::<combat::SimFrozen>()
+            .init_resource::<combat::RespawnPoint>()
+            .add_message::<combat::Hit>()
+            .add_message::<combat::PlayerDied>()
+            .add_message::<combat::PlayerRespawned>()
+            .add_message::<combat::EnemyDied>()
             .configure_sets(
                 FixedUpdate,
                 (
@@ -65,9 +73,39 @@ impl Plugin for SimPlugin {
                 )
                     .chain(),
             );
-        app.add_systems(FixedUpdate, advance_tick.before(SimSet::Input));
-        app.add_systems(FixedUpdate, components::snapshot_prev.in_set(SimSet::Input));
-        app.add_systems(FixedUpdate, player::player_movement.in_set(SimSet::Motion));
+        // Hitstop freezes everything from Intent through Status. Input (which
+        // latches presses and counts the freeze down) and Cleanup still run.
+        app.configure_sets(
+            FixedUpdate,
+            (
+                SimSet::Intent,
+                SimSet::Motion,
+                SimSet::Collision,
+                SimSet::HitDetect,
+                SimSet::HitResolve,
+                SimSet::Status,
+            )
+                .run_if(combat::not_frozen),
+        );
+        app.add_systems(
+            FixedUpdate,
+            (
+                advance_tick.before(SimSet::Input),
+                (components::snapshot_prev, combat::status::advance_hitstop).in_set(SimSet::Input),
+                combat::attack::player_combat.in_set(SimSet::Intent),
+                (
+                    player::player_movement,
+                    combat::attack::hitbox_follow.after(player::player_movement),
+                    combat::attack::projectile_motion,
+                    combat::attack::knockback_motion,
+                )
+                    .in_set(SimSet::Motion),
+                combat::detect::detect_hits.in_set(SimSet::HitDetect),
+                combat::resolve::resolve_hits.in_set(SimSet::HitResolve),
+                (combat::status::player_status, combat::status::tick_timers).in_set(SimSet::Status),
+                combat::status::cleanup_expired.in_set(SimSet::Cleanup),
+            ),
+        );
     }
 }
 
