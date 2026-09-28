@@ -2,6 +2,7 @@
 //! tells, the player's state colour and flicker, HUD and the room banner.
 
 use bevy::prelude::*;
+use hk_sim::boss::{Boss, Pendulum};
 use hk_sim::combat::*;
 use hk_sim::components::{Aabb, SimPos};
 use hk_sim::enemy::{Brain, EnemyKind, EnemyState};
@@ -64,7 +65,7 @@ fn attach_body_visuals(
             Option<&Brain>,
             Has<Guard>,
         ),
-        Added<Hurtbox>,
+        (Added<Hurtbox>, Without<Boss>, Without<Pendulum>),
     >,
 ) {
     for (e, hu, aabb, pos, brain, guard) in &q {
@@ -187,6 +188,11 @@ fn attach_player_extras(
     q: Query<Entity, Added<Player>>,
 ) {
     for e in &q {
+        // Transform + Visibility first, so the children below never see a
+        // parent that lacks them (Bevy warns B0004 about that).
+        commands
+            .entity(e)
+            .insert((Transform::default(), Visibility::default()));
         commands.entity(e).with_children(|p| {
             p.spawn((
                 PointLight {
@@ -274,7 +280,7 @@ fn spawn_hud(mut commands: Commands) {
     commands
         .spawn(Node {
             position_type: PositionType::Absolute,
-            top: Val::Px(52.0),
+            top: Val::Px(84.0),
             width: Val::Percent(100.0),
             justify_content: JustifyContent::Center,
             ..default()

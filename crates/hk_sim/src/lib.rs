@@ -146,7 +146,7 @@ impl Plugin for SimPlugin {
     }
 }
 
-fn advance_tick(mut tick: ResMut<SimTick>) {
+pub fn advance_tick(mut tick: ResMut<SimTick>) {
     tick.0 += 1;
 }
 

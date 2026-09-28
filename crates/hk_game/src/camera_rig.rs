@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use hk_sim::boss::{BossBrain, BossState};
 use hk_sim::camera::{camera_step, Bounds, CameraInput, CameraState};
 use hk_sim::combat::{Blocked, EnemyDied, Hit, HitKind, PlayerDied, Team};
 use hk_sim::components::Velocity;
@@ -55,6 +56,7 @@ fn camera_rig(
         (&Transform, &Velocity, &Motor, &PlayerState),
         (With<Player>, Without<MainCamera>),
     >,
+    bosses: Query<(&BossBrain, &Transform), (Without<Player>, Without<MainCamera>)>,
     mut cam: Query<&mut Transform, With<MainCamera>>,
 ) {
     let (Ok((pt, vel, motor, state)), Ok(mut ct), Ok(w)) =
@@ -64,7 +66,15 @@ fn camera_rig(
     };
     let t = &tuning.camera;
     let aspect = w.width() / w.height().max(1.0);
-    let target = pt.translation.truncate();
+    let mut target = pt.translation.truncate();
+    // Boss fight: lean toward the boss so both stay in frame, but never so far
+    // that the player drifts toward the screen edge.
+    if let Some((_, bt)) = bosses
+        .iter()
+        .find(|(b, _)| !matches!(b.state, BossState::Sleeping | BossState::Dying))
+    {
+        target.x += ((bt.translation.x - target.x) * 0.5).clamp(-6.0, 6.0);
+    }
     let bounds = library
         .get(&current.id)
         .map(|d| Bounds::new(Vec2::ZERO, Vec2::new(d.width() as f32, d.height() as f32)));

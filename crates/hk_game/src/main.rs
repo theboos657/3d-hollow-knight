@@ -2,11 +2,15 @@
 //! all gameplay decisions live in `hk_sim`.
 //!
 //! Options: `--room ID` (default `sandbox`), `--entry NAME` (default `start`),
-//! `--smoke-test` (scripted headless run that saves `out/smoke.png`).
+//! `--smoke-test` (scripted headless run that saves `out/smoke.png`),
+//! `--bot` (the boss-fight bot plays), `--shots moment,...` and
+//! `--boss-hp-pct N` (see demo.rs).
 
 mod assets;
+mod boss_view;
 mod camera_rig;
 mod debug;
+mod demo;
 mod devices;
 mod interp;
 mod scene;
@@ -29,6 +33,11 @@ fn main() {
             .and_then(|i| args.get(i + 1))
             .cloned()
     };
+    let bot = args.iter().any(|a| a == "--bot");
+    let shots: Vec<String> = value_of("--shots")
+        .map(|v| v.split(',').map(str::to_owned).collect())
+        .unwrap_or_default();
+    let boss_hp_pct = value_of("--boss-hp-pct").and_then(|v| v.parse::<f32>().ok());
     let start = world_view::StartRoom {
         room: value_of("--room").unwrap_or_else(|| "sandbox".into()),
         entry: value_of("--entry").unwrap_or_else(|| "start".into()),
@@ -75,11 +84,17 @@ fn main() {
         visuals::VisualsPlugin,
         camera_rig::CameraRigPlugin,
         vfx::VfxPlugin,
+        boss_view::BossViewPlugin,
         debug::DebugPlugin { smoke },
+        demo::DemoPlugin {
+            bot,
+            shots,
+            boss_hp_pct,
+        },
     ));
 
     // A smoke run is scripted (see debug.rs); real devices would fight it.
-    if !smoke {
+    if !smoke && !bot {
         app.add_plugins(devices::DevicePlugin);
     }
 

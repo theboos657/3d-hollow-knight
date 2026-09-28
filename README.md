@@ -62,6 +62,21 @@ Enemies (they all telegraph, and glow to show what they are doing):
 
 Everything respawns a few seconds after dying.
 
+### Bosses
+
+Two test arenas exist while the world is being built: `cargo play -- --room dev_matron`
+(the Gutter Matron) and `cargo play -- --room dev_bellwarden` (the Bellwarden). The
+boss wakes when you walk in; the doorways glow red until it is over.
+
+They use the same colour language as enemies: **flashing amber = an attack is coming,
+red = it is happening, blue = it is recovering, hit it now.** Amber floor marks show
+where bells will fall (blink faster as they near). Golden swinging bells can be
+pogoed. The bar at the top shows the boss's health with a notch at each phase change.
+
+Watch the bot fight (it plays with human-like reaction time):
+`cargo play -- --room dev_bellwarden --bot` (add `--boss-hp-pct 40` to start a
+fight late).
+
 ## Development
 
 ```
