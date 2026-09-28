@@ -36,6 +36,7 @@ pub fn player_status(
     mut commands: Commands,
     tuning: Res<Tuning>,
     respawn: Res<RespawnPoint>,
+    checkpoint: Res<crate::world::progress::Checkpoint>,
     mut respawned: MessageWriter<PlayerRespawned>,
     hazards: Query<(&SimPos, &Hitbox), Without<Player>>,
     mut q: Query<
@@ -59,11 +60,16 @@ pub fn player_status(
             if cs.dead_ticks == 0 {
                 hp.hp = hp.max;
                 soul.value = 0;
-                pos.0 = respawn.0;
+                // With a checkpoint the room reloads around the player at the
+                // bench (see `respawn_at_checkpoint`); without one, stand up
+                // at the respawn point.
+                if !checkpoint.is_set() {
+                    pos.0 = respawn.0;
+                    safe.pos = respawn.0;
+                }
                 vel.0 = Vec2::ZERO;
                 *motor = Motor::default();
                 *cs = CombatState::default();
-                safe.pos = respawn.0;
                 safe.stable_ticks = 0;
                 commands
                     .entity(entity)

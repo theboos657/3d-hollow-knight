@@ -14,6 +14,7 @@ pub mod components;
 pub mod enemy;
 pub mod input;
 pub mod player;
+pub mod reach;
 pub mod rng;
 pub mod testing;
 pub mod tuning;
@@ -51,6 +52,12 @@ pub struct SimPlugin;
 
 impl Plugin for SimPlugin {
     fn build(&self, app: &mut App) {
+        // The simulation runs on one thread, in a fixed order: identical
+        // behaviour in the game, the tests and the bots, and no thread-pool
+        // overhead for what are very small systems (measured ~40x faster).
+        app.edit_schedule(FixedUpdate, |s| {
+            s.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+        });
         app.init_resource::<SimTick>()
             .init_resource::<input::InputState>()
             .init_resource::<rng::SimRng>()
@@ -63,6 +70,9 @@ impl Plugin for SimPlugin {
             .init_resource::<world::room::CurrentRoom>()
             .init_resource::<world::room::WorldFlags>()
             .init_resource::<world::room::Transition>()
+            .init_resource::<world::progress::Checkpoint>()
+            .add_message::<world::progress::BenchRested>()
+            .add_message::<world::progress::AbilityGained>()
             .add_message::<world::room::RoomEntered>()
             .init_resource::<boss::ArenaLock>()
             .add_message::<boss::BossAwoke>()
@@ -138,6 +148,10 @@ impl Plugin for SimPlugin {
                     world::room::detect_exits,
                     boss::ai::update_arena_lock,
                     boss::ai::record_boss_defeat,
+                    world::progress::bench_rest,
+                    world::progress::collect_pickups,
+                    world::progress::boss_rewards.after(boss::ai::record_boss_defeat),
+                    world::progress::respawn_at_checkpoint.after(combat::status::player_status),
                 )
                     .in_set(SimSet::Status),
                 combat::status::cleanup_expired.in_set(SimSet::Cleanup),

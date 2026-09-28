@@ -39,6 +39,22 @@ pub struct Abilities {
     pub wall_grip: bool,
 }
 
+impl Abilities {
+    pub fn has(&self, a: crate::world::room::Ability) -> bool {
+        match a {
+            crate::world::room::Ability::Dash => self.dash,
+            crate::world::room::Ability::WallGrip => self.wall_grip,
+        }
+    }
+
+    pub fn grant(&mut self, a: crate::world::room::Ability) {
+        match a {
+            crate::world::room::Ability::Dash => self.dash = true,
+            crate::world::room::Ability::WallGrip => self.wall_grip = true,
+        }
+    }
+}
+
 /// Per-player locomotion bookkeeping. Timers are in ticks.
 #[derive(Component, Clone, Debug, Default)]
 pub struct Motor {

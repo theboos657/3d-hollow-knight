@@ -147,15 +147,25 @@ impl RoomDef {
         self.entries.iter().find(|e| e.name == name)
     }
 
-    /// Stable tag for spawn `i` (used for respawn and persistence).
-    pub fn spawn_tag(&self, i: usize) -> u32 {
-        // FNV-1a of the room id, with the spawn index in the low 12 bits.
+    fn id_hash(&self) -> u32 {
+        // FNV-1a of the room id.
         let mut h: u32 = 0x811c_9dc5;
         for b in self.id.bytes() {
             h ^= b as u32;
             h = h.wrapping_mul(0x0100_0193);
         }
-        (h & 0xFFFF_F000) | (i as u32 & 0xFFF)
+        h & 0xFFFF_F000
+    }
+
+    /// Stable tag for spawn `i` (used for respawn and persistence): the room's
+    /// hash with the spawn index in the low 11 bits.
+    pub fn spawn_tag(&self, i: usize) -> u32 {
+        self.id_hash() | (i as u32 & 0x7FF)
+    }
+
+    /// Stable tag for pickup `i`; never collides with a spawn tag.
+    pub fn pickup_tag(&self, i: usize) -> u32 {
+        self.id_hash() | 0x800 | (i as u32 & 0x7FF)
     }
 
     /// Self-contained checks (cross-room links are checked by [`RoomLibrary::validate`]).
@@ -321,12 +331,15 @@ pub struct RoomExit {
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Bench {
     pub half: Vec2,
+    /// Where the bench's base sits (where you stand up after resting).
+    pub base: Vec2,
 }
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct Pickup {
     pub ability: Ability,
     pub half: Vec2,
+    pub tag: u32,
 }
 
 #[derive(Resource, Default, Clone, Debug)]
@@ -338,6 +351,8 @@ pub struct CurrentRoom {
 #[derive(Resource, Default, Clone, Debug)]
 pub struct WorldFlags {
     pub defeated: HashSet<u32>,
+    /// Pickups already taken (by [`RoomDef::pickup_tag`]).
+    pub collected: HashSet<u32>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -476,6 +491,22 @@ pub fn enter_room(world: &mut World, id: &str, entry: &str) -> Result<(), String
         .entry(entry)
         .cloned()
         .ok_or_else(|| format!("room `{id}` has no entry `{entry}`"))?;
+    enter_room_at(
+        world,
+        id,
+        Vec2::new(entry_def.at.0, entry_def.at.1),
+        entry_def.facing,
+    )
+}
+
+/// Replaces the current room with `id`, placing the player's feet at `feet`.
+/// Used for entries, benches and respawns alike.
+pub fn enter_room_at(world: &mut World, id: &str, feet: Vec2, facing: i8) -> Result<(), String> {
+    let def = world
+        .resource::<RoomLibrary>()
+        .get(id)
+        .cloned()
+        .ok_or_else(|| format!("unknown room `{id}`"))?;
 
     // Tear down the old room and anything in flight.
     let old: Vec<Entity> = world
@@ -523,9 +554,21 @@ pub fn enter_room(world: &mut World, id: &str, entry: &str) -> Result<(), String
     for b in &def.benches {
         let half = Vec2::new(0.6, 0.6);
         let pos = Vec2::new(b.at.0, b.at.1 + half.y);
-        world.spawn((RoomEntity, SimPos(pos), PrevPos(pos), Bench { half }));
+        world.spawn((
+            RoomEntity,
+            SimPos(pos),
+            PrevPos(pos),
+            Bench {
+                half,
+                base: Vec2::new(b.at.0, b.at.1),
+            },
+        ));
     }
-    for p in &def.pickups {
+    let collected = world.resource::<WorldFlags>().collected.clone();
+    for (i, p) in def.pickups.iter().enumerate() {
+        if collected.contains(&def.pickup_tag(i)) {
+            continue;
+        }
         let half = Vec2::new(0.5, 0.5);
         let pos = Vec2::new(p.at.0, p.at.1 + half.y);
         world.spawn((
@@ -535,6 +578,7 @@ pub fn enter_room(world: &mut World, id: &str, entry: &str) -> Result<(), String
             Pickup {
                 ability: p.ability,
                 half,
+                tag: def.pickup_tag(i),
             },
         ));
     }
@@ -546,7 +590,7 @@ pub fn enter_room(world: &mut World, id: &str, entry: &str) -> Result<(), String
         .next();
     if let Some(p) = player {
         let half_y = world.get::<Aabb>(p).map_or(0.75, |a| a.half.y);
-        let pos = Vec2::new(entry_def.at.0, entry_def.at.1 + half_y + SKIN);
+        let pos = Vec2::new(feet.x, feet.y + half_y + SKIN);
         if let Some(mut c) = world.get_mut::<CombatState>(p) {
             c.attack = None;
             c.focusing = false;
@@ -561,7 +605,7 @@ pub fn enter_room(world: &mut World, id: &str, entry: &str) -> Result<(), String
             m.wall_lock = 0;
         }
         if let Some(mut f) = world.get_mut::<Facing>(p) {
-            f.0 = entry_def.facing;
+            f.0 = facing;
         }
         if let Some(mut s) = world.get_mut::<SafeGround>(p) {
             s.pos = pos;
@@ -602,6 +646,9 @@ pub struct Transition {
     pub ticks: u32,
     pub to: String,
     pub entry: String,
+    /// Place the player here (feet, facing) instead of at `entry`: benches
+    /// and respawns.
+    pub at: Option<(Vec2, i8)>,
 }
 
 impl Transition {
@@ -639,6 +686,7 @@ pub fn detect_exits(
                 tr.ticks = FADE_TICKS;
                 tr.to = x.to.clone();
                 tr.entry = x.entry.clone();
+                tr.at = None;
                 return;
             }
         }
@@ -656,11 +704,15 @@ pub fn run_transition(world: &mut World) {
         Phase::Out => {
             let left = ticks.saturating_sub(1);
             if left == 0 {
-                let (to, entry) = {
+                let (to, entry, at) = {
                     let t = world.resource::<Transition>();
-                    (t.to.clone(), t.entry.clone())
+                    (t.to.clone(), t.entry.clone(), t.at)
                 };
-                if let Err(e) = enter_room(world, &to, &entry) {
+                let result = match at {
+                    Some((feet, facing)) => enter_room_at(world, &to, feet, facing),
+                    None => enter_room(world, &to, &entry),
+                };
+                if let Err(e) = result {
                     // Never strand the player in a black screen.
                     eprintln!("room transition failed: {e}");
                 }
