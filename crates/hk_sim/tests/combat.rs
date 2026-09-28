@@ -187,6 +187,64 @@ fn down_slash_only_exists_in_the_air() {
     assert_eq!(cs(&h, p).attack.unwrap().dir, AttackDir::Down);
 }
 
+// ------------------------------------------------------------ dash i-frames --
+
+#[test]
+fn dashing_through_a_hazard_is_safe_but_only_for_about_120ms() {
+    let (mut h, p) = flat_scene(DASH);
+    // Two thin damage zones on the dash path. The dash moves 0.2 u per tick,
+    // and the i-frames cover the first 15 ticks (x = 10 .. ~13).
+    let _early = damage_zone(
+        &mut h,
+        Vec2::new(11.5, 2.75),
+        Vec2::new(0.3, 1.5),
+        Team::Enemy,
+        HitKind::Contact,
+    );
+    let _late = damage_zone(
+        &mut h,
+        Vec2::new(13.9, 2.75),
+        Vec2::new(0.3, 1.5),
+        Team::Enemy,
+        HitKind::Contact,
+    );
+    h.press(Action::Dash);
+    h.tick();
+    h.release(Action::Dash);
+    assert!(
+        h.world().get::<Invulnerable>(p).is_some(),
+        "dash grants i-frames"
+    );
+    let mut hp_after_early = None;
+    for _ in 0..30 {
+        h.tick();
+        let x = pos(&h, p).x;
+        if x > 12.5 && hp_after_early.is_none() {
+            hp_after_early = Some(hp(&h, p));
+        }
+    }
+    assert_eq!(
+        hp_after_early,
+        Some(5),
+        "passed through the first zone unharmed"
+    );
+    assert_eq!(
+        hp(&h, p),
+        4,
+        "the second zone, reached after the i-frames ended, hurts"
+    );
+}
+
+#[test]
+fn dash_iframes_never_cut_short_longer_ones() {
+    let (mut h, p) = flat_scene(DASH);
+    h.world_mut().entity_mut(p).insert(Invulnerable(500));
+    h.press(Action::Dash);
+    h.tick();
+    let left = h.world().get::<Invulnerable>(p).unwrap().0;
+    assert!(left > 400, "kept the longer window: {left}");
+}
+
 // ------------------------------------------------------------- pogo/soul --
 
 fn pogo_scene(abil: hk_sim::player::Abilities) -> (Harness, Entity) {

@@ -109,6 +109,11 @@ impl InputState {
     }
 }
 
+/// Bit of `action` in a held-bitset (see [`InputState::held_bits`]).
+pub fn bit(action: Action) -> u16 {
+    1 << action.idx()
+}
+
 /// Convenience for tests and replays: apply a held-bitset for the *next* tick.
 pub fn apply_bits(input: &mut InputState, bits: u16, tick: &SimTick) {
     for a in Action::ALL {

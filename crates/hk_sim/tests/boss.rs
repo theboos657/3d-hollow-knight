@@ -105,7 +105,7 @@ fn phases_are_well_formed_and_every_phase_has_real_choices() {
     }
     let bw = defs().get("bellwarden").unwrap().clone();
     assert_eq!(bw.phases(), 3);
-    assert_eq!(bw.hp, 800);
+    assert_eq!(bw.hp, 350);
 }
 
 // ---------------------------------------------------------------- selection --
@@ -379,7 +379,7 @@ fn the_waking_roar_is_invulnerable_and_harmless() {
     h.press(Action::Attack);
     h.tick_n(30);
     assert_eq!(player_hp(&h, p), 5, "no contact damage while waking");
-    assert_eq!(boss_hp(&h, b), 800, "no damage taken while waking");
+    assert_eq!(boss_hp(&h, b), 350, "no damage taken while waking");
     // After the intro the fight is on.
     h.release(Action::Attack);
     h.tick_n(ticks(2000.0) as u32);
@@ -583,8 +583,8 @@ fn bells_warn_with_glyphs_then_drop_exactly_there() {
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(
         xs,
-        vec![17.0, 20.0, 23.0],
-        "one on the player, one each side (spread 3)"
+        vec![16.4, 20.0, 23.6],
+        "one on the player, one each side (spread 3.6)"
     );
 
     // The warning is visible for exactly 800 ms (96 ticks, counting the first
@@ -617,8 +617,8 @@ fn stepping_off_the_glyph_avoids_the_bell() {
     while count::<Glyph>(&mut h) == 0 {
         h.tick();
     }
-    // Slip to x = 21.5: 1.5 from the glyph at 20 and from the one at 23.
-    h.world_mut().get_mut::<SimPos>(p).unwrap().0.x = 21.5;
+    // Slip into the gap at x = 21.8: 1.8 from the glyph at 20 and 1.8 from the one at 23.6.
+    h.world_mut().get_mut::<SimPos>(p).unwrap().0.x = 21.8;
     h.tick_n(ticks(800.0) as u32 + 100);
     assert_eq!(player_hp(&h, p), 5, "safe between the glyphs");
 }
@@ -771,7 +771,7 @@ fn phases_change_after_the_current_attack_and_the_roar_is_invulnerable() {
         guard += 1;
         assert!(guard < 600);
     }
-    set_boss_hp(&mut h, b, 500); // 62.5 %
+    set_boss_hp(&mut h, b, 220); // 62.9 %, just under the 65 % threshold
     assert_ne!(bb(&h, b).state, BossState::Transition);
     guard = 0;
     while bb(&h, b).state != BossState::Transition {
@@ -989,7 +989,7 @@ fn a_boss_cannot_be_knocked_back_but_can_be_pogoed() {
         }
     }
     assert!(bounced, "pogo off the boss's head");
-    assert!(boss_hp(&h, b) < 800, "and it damaged the boss");
+    assert!(boss_hp(&h, b) < 350, "and it damaged the boss");
     assert!(
         h.world().get::<Knockback>(b).is_none(),
         "no knockback on bosses"
@@ -1036,7 +1036,7 @@ fn a_whole_boss_fight_replays_bit_identically() {
     assert_eq!(a, b);
     assert_eq!(seq_a, seq_b);
     assert!(a.iter().any(|t| t.2 < 5), "the player took damage");
-    assert!(a.iter().any(|t| t.3 < 800), "the boss took damage");
+    assert!(a.iter().any(|t| t.3 < 350), "the boss took damage");
     assert!(seq_a.len() >= 3, "several attacks happened: {seq_a:?}");
 }
 

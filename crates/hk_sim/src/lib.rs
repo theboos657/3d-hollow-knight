@@ -7,6 +7,7 @@ use bevy_app::{App, FixedUpdate, Plugin};
 use bevy_ecs::prelude::*;
 
 pub mod boss;
+pub mod bot;
 pub mod camera;
 pub mod combat;
 pub mod components;

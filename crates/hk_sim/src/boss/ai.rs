@@ -18,8 +18,6 @@ use crate::world::room::WorldFlags;
 const GRAVITY: f32 = 60.0;
 /// Bells fall this fast.
 const BELL_SPEED: f32 = 28.0;
-/// Strongest horizontal speed of a slam leap.
-const MAX_LEAP_VX: f32 = 14.0;
 /// Melee arcs linger this many ticks.
 const ARC_TICKS: u32 = 12;
 
@@ -409,7 +407,9 @@ fn start_attack(
                     ticks: ms_to_ticks(warn_ms) + 1,
                     x,
                     ceiling_y: hi.y - 0.8,
-                    bell_half: Vec2::new(0.6, 0.6),
+                    // Narrow enough that the gaps between glyphs are a comfortable
+                    // target: a bell hurts within 0.5 + 0.3 = 0.8 u of its centre.
+                    bell_half: Vec2::new(0.5, 0.6),
                 },
                 SimPos(Vec2::new(x, feet.y + 0.05)),
                 PrevPos(Vec2::new(x, feet.y + 0.05)),
@@ -439,6 +439,7 @@ fn active_step(
     match atk.kind {
         AttackKind::Slam {
             leap_vy,
+            max_leap_speed,
             shock_speed,
             shock_ms,
         } => {
@@ -446,7 +447,7 @@ fn active_step(
             if first {
                 let air_time = 2.0 * leap_vy / GRAVITY;
                 vel.y = leap_vy;
-                vel.x = ((b.aim.x - pos.x) / air_time).clamp(-MAX_LEAP_VX, MAX_LEAP_VX);
+                vel.x = ((b.aim.x - pos.x) / air_time).clamp(-max_leap_speed, max_leap_speed);
                 b.sub_timer = 0;
             } else if b.sub_timer == 0 && !grounded {
                 b.sub_timer = 1;
@@ -515,6 +516,7 @@ fn active_step(
             amp,
             period_ms,
             life_ms,
+            hang_height,
         } => {
             if first {
                 for p in pendulums {
@@ -522,10 +524,14 @@ fn active_step(
                 }
                 let (lo, hi) = b.arena;
                 let width = hi.x - lo.x;
-                let length = 4.5;
+                // Hang from the ceiling, with the bells' lowest point `hang_height`
+                // above the floor: high enough to walk under, low enough that
+                // jumping into them (or pogoing off them) matters.
+                let pivot_y = hi.y - 0.5;
+                let length = (pivot_y - (lo.y + hang_height + 0.7)).max(amp + 1.0);
                 for k in 0..count {
                     let x = lo.x + (k + 1) as f32 * width / (count + 1) as f32;
-                    let pivot = Vec2::new(x, hi.y - 0.5);
+                    let pivot = Vec2::new(x, pivot_y);
                     let period = ms_to_ticks(period_ms).max(2);
                     let bob = pivot + Vec2::new(0.0, -length);
                     let half_b = Vec2::new(0.7, 0.7);

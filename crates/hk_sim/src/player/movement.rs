@@ -9,7 +9,7 @@ use bevy_ecs::prelude::*;
 use bevy_math::Vec2;
 
 use super::{Aabb, Abilities, Facing, Motor, Player, PlayerState};
-use crate::combat::CombatState;
+use crate::combat::{CombatState, Invulnerable};
 use crate::components::{SimPos, Velocity};
 use crate::input::{Action, InputState};
 use crate::tuning::Tuning;
@@ -24,12 +24,15 @@ fn approach(v: f32, target: f32, max_delta: f32) -> f32 {
     }
 }
 pub fn player_movement(
+    mut commands: Commands,
     mut input: ResMut<InputState>,
     tick: Res<SimTick>,
     grid: Res<TileGrid>,
     tuning: Res<Tuning>,
     mut q: Query<
         (
+            Entity,
+            Option<&Invulnerable>,
             &mut SimPos,
             &mut Velocity,
             &Aabb,
@@ -46,7 +49,7 @@ pub fn player_movement(
     let now = tick.0;
     let jump_buf = p.jump_buffer_ticks();
 
-    for (mut pos, mut vel, aabb, mut m, mut state, mut facing, abil, cs) in &mut q {
+    for (entity, inv, mut pos, mut vel, aabb, mut m, mut state, mut facing, abil, cs) in &mut q {
         // Dead: hold still until the respawn logic moves us.
         if cs.dead {
             vel.0 = Vec2::ZERO;
@@ -93,6 +96,13 @@ pub fn player_movement(
             }
             facing.0 = dir;
             m.jumping = false;
+            // Dash through attacks: a short window of invulnerability (never
+            // shortening longer i-frames already running). +1 because Status
+            // ticks it down once in this same tick.
+            let frames = p.dash_iframes_ticks();
+            if frames > 0 && inv.is_none_or(|i| i.0 < frames + 1) {
+                commands.entity(entity).insert(Invulnerable(frames + 1));
+            }
         }
 
         // ---- jump ----

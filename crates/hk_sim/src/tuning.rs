@@ -53,6 +53,8 @@ pub struct PlayerTuning {
     pub dash_cooldown_ms: f32,
     /// Horizontal speed multiplier (of run speed) when jumping out of a dash.
     pub dash_jump_boost: f32,
+    /// Brief invulnerability at the start of a dash: dash *through* attacks.
+    pub dash_iframes_ms: f32,
 
     pub wall_slide_speed: f32,
     pub wall_jump_vx: f32,
@@ -88,6 +90,7 @@ impl Default for PlayerTuning {
             dash_ms: 170.0,
             dash_cooldown_ms: 350.0,
             dash_jump_boost: 1.35,
+            dash_iframes_ms: 120.0,
             wall_slide_speed: 3.5,
             wall_jump_vx: 9.0,
             wall_jump_vy: 18.0,
@@ -137,6 +140,9 @@ impl PlayerTuning {
     }
     pub fn dash_cooldown_ticks(&self) -> u32 {
         ms_to_ticks(self.dash_cooldown_ms)
+    }
+    pub fn dash_iframes_ticks(&self) -> u32 {
+        ms_to_ticks(self.dash_iframes_ms)
     }
     pub fn wall_lock_ticks(&self) -> u32 {
         ms_to_ticks(self.wall_lock_ms)
@@ -680,6 +686,8 @@ pub enum AttackKind {
     /// Leap at the player, slam down, and send a shockwave along the floor each way.
     Slam {
         leap_vy: f32,
+        /// Fastest horizontal speed of the leap (limits how far it can reach).
+        max_leap_speed: f32,
         shock_speed: f32,
         shock_ms: f32,
     },
@@ -702,6 +710,8 @@ pub enum AttackKind {
         amp: f32,
         period_ms: f32,
         life_ms: f32,
+        /// Height of the bells' lowest point above the floor.
+        hang_height: f32,
     },
     /// Repeated shockwaves outward from the boss: jump each one.
     Toll {
@@ -817,12 +827,14 @@ fn attack(
 
 impl Default for BossTuning {
     fn default() -> Self {
-        let slam = |tele, rec, w| {
+        // (telegraph ms, recover ms, weight, max leap speed, shockwave speed)
+        let slam = |tele, rec, w, leap, shock| {
             attack(
                 "Toll Slam",
                 AttackKind::Slam {
                     leap_vy: 20.0,
-                    shock_speed: 10.0,
+                    max_leap_speed: leap,
+                    shock_speed: shock,
                     shock_ms: 2600.0,
                 },
                 tele,
@@ -855,7 +867,7 @@ impl Default for BossTuning {
                     id: "matron".into(),
                     name: "Gutter Matron".into(),
                     hp: 300,
-                    half: (1.1, 1.3),
+                    half: (1.1, 1.0),
                     walk_speed: 3.2,
                     approach_ms: 1600.0,
                     intro_ms: 1200.0,
@@ -864,31 +876,34 @@ impl Default for BossTuning {
                     recover_mult: vec![1.0],
                     contact_damage: 1,
                     death_ms: 1800.0,
-                    attacks: vec![slam(600.0, 800.0, 1.0), charge(16.0, 500.0, 900.0, 1.0)],
+                    attacks: vec![
+                        slam(600.0, 800.0, 1.0, 14.0, 10.0),
+                        charge(16.0, 500.0, 900.0, 1.0),
+                    ],
                 },
                 // The final boss: three phases.
                 BossDef {
                     id: "bellwarden".into(),
                     name: "The Bellwarden".into(),
-                    hp: 800,
-                    half: (1.5, 2.0),
+                    hp: 350,
+                    half: (1.5, 1.4),
                     walk_speed: 3.0,
                     approach_ms: 1500.0,
                     intro_ms: 2000.0,
                     transition_ms: 1500.0,
                     phase_thresholds: vec![0.65, 0.30],
-                    recover_mult: vec![1.0, 0.9, 0.8],
+                    recover_mult: vec![1.0, 1.0, 0.9],
                     contact_damage: 1,
                     death_ms: 2500.0,
                     attacks: vec![
-                        slam(650.0, 700.0, 3.0),
+                        slam(650.0, 900.0, 2.0, 11.0, 9.0),
                         charge(20.0, 550.0, 800.0, 2.0),
                         attack(
                             "Falling Bells",
                             AttackKind::Bells {
                                 count: 3,
                                 warn_ms: 800.0,
-                                spread: 3.0,
+                                spread: 3.6,
                             },
                             800.0,
                             1200.0,
@@ -902,7 +917,7 @@ impl Default for BossTuning {
                             AttackKind::Bells {
                                 count: 5,
                                 warn_ms: 800.0,
-                                spread: 2.6,
+                                spread: 3.6,
                             },
                             800.0,
                             1200.0,
@@ -931,6 +946,7 @@ impl Default for BossTuning {
                                 amp: 3.5,
                                 period_ms: 2600.0,
                                 life_ms: 9000.0,
+                                hang_height: 3.4,
                             },
                             700.0,
                             300.0,

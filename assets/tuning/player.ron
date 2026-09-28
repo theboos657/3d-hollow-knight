@@ -21,6 +21,7 @@
     dash_ms: 170.0,
     dash_cooldown_ms: 350.0,
     dash_jump_boost: 1.35,
+    dash_iframes_ms: 120.0,
     wall_slide_speed: 3.5,
     wall_jump_vx: 9.0,
     wall_jump_vy: 18.0,
