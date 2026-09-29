@@ -136,6 +136,7 @@ fn main() {
             models::knight::KnightPlugin,
             models::enemies::EnemyModelsPlugin,
             look::LookPlugin,
+            look::vignette::VignettePlugin,
             models::projectiles::ProjectilePlugin,
         ),
         boss_view::BossViewPlugin,
@@ -169,6 +170,14 @@ fn main() {
                     .collect()
             }),
         });
+    }
+    if let Some(q) = value_of("--quality") {
+        match settings::Quality::parse(&q) {
+            Some(q) => {
+                app.insert_resource(look::quality::QualityOverride(Some(q)));
+            }
+            None => eprintln!("--quality wants low, medium or high (got `{q}`)"),
+        }
     }
     if args.iter().any(|a| a == "--show-hitboxes") {
         app.insert_resource(visuals::ShowHitboxes(true));

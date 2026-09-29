@@ -97,6 +97,7 @@ enum Item {
     Sfx,
     Shake,
     Vsync,
+    Quality,
     Controls,
     Back,
     Bind(Action),
@@ -140,6 +141,7 @@ fn items(screen: &Screen, has_save: bool) -> Vec<Item> {
             Item::Sfx,
             Item::Shake,
             Item::Vsync,
+            Item::Quality,
             Item::Controls,
             Item::Back,
         ],
@@ -168,6 +170,7 @@ fn label(item: &Item, s: &Settings, menu: &Menu) -> String {
         Item::Sfx => format!("Effects volume  < {} >", pct(s.sfx)),
         Item::Shake => format!("Screen shake    < {} >", onoff(s.shake)),
         Item::Vsync => format!("VSync           < {} >", onoff(s.vsync)),
+        Item::Quality => format!("Graphics        < {} >", s.quality.name()),
         Item::Controls => "Controls".into(),
         Item::Back => "Back".into(),
         Item::Bind(a) => {
@@ -300,6 +303,8 @@ fn menu_input(
             }
             Item::Shake => settings.shake = !settings.shake,
             Item::Vsync => settings.vsync = !settings.vsync,
+            // Left goes down a tier, right or confirm goes up.
+            Item::Quality => settings.quality = settings.quality.step(step >= 0.0),
             _ => {}
         }
         settings.clamp();

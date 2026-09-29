@@ -39,6 +39,45 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
     KEY_TABLE.iter().find(|(_, n)| *n == name).map(|(c, _)| *c)
 }
 
+/// How much the renderer is asked to do. Medium is the default; Low is for
+/// weak or integrated GPUs, High adds sharper edges and ambient occlusion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Quality {
+    Low,
+    #[default]
+    Medium,
+    High,
+}
+
+impl Quality {
+    pub const ALL: [Quality; 3] = [Quality::Low, Quality::Medium, Quality::High];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Quality::Low => "Low",
+            Quality::Medium => "Medium",
+            Quality::High => "High",
+        }
+    }
+
+    /// The next tier, wrapping around (`forward = false` goes the other way).
+    pub fn step(self, forward: bool) -> Quality {
+        let i = Quality::ALL.iter().position(|q| *q == self).unwrap_or(1);
+        let n = Quality::ALL.len();
+        Quality::ALL[if forward {
+            (i + 1) % n
+        } else {
+            (i + n - 1) % n
+        }]
+    }
+
+    pub fn parse(s: &str) -> Option<Quality> {
+        Quality::ALL
+            .into_iter()
+            .find(|q| q.name().eq_ignore_ascii_case(s))
+    }
+}
+
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -47,6 +86,7 @@ pub struct Settings {
     pub sfx: f32,
     pub shake: bool,
     pub vsync: bool,
+    pub quality: Quality,
     /// Keys per action (by name); the first is the one the menu rebinds.
     pub keys: Vec<(Action, Vec<String>)>,
 }
@@ -60,6 +100,7 @@ impl Default for Settings {
             sfx: 0.9,
             shake: true,
             vsync: true,
+            quality: Quality::Medium,
             keys: vec![
                 k(Action::Left, &["Left", "A"]),
                 k(Action::Right, &["Right", "D"]),
@@ -182,6 +223,19 @@ mod tests {
         for a in Action::ALL {
             assert!(!s.key_codes(a).is_empty(), "{a:?} has no key");
         }
+    }
+
+    #[test]
+    fn quality_steps_wrap_and_parse_by_name() {
+        assert_eq!(Quality::Low.step(true), Quality::Medium);
+        assert_eq!(Quality::High.step(true), Quality::Low);
+        assert_eq!(Quality::Low.step(false), Quality::High);
+        assert_eq!(Quality::parse("high"), Some(Quality::High));
+        assert_eq!(Quality::parse("MEDIUM"), Some(Quality::Medium));
+        assert_eq!(Quality::parse("ultra"), None);
+        // Old settings files (from before there was a quality setting) get Medium.
+        let s: Settings = ron::from_str("(master: 0.5, vsync: false)").unwrap();
+        assert_eq!(s.quality, Quality::Medium);
     }
 
     #[test]

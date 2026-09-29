@@ -6,12 +6,13 @@ use bevy::prelude::*;
 use bevy::render::view::ColorGrading;
 use hk_sim::world::room::{RoomEntered, RoomLibrary};
 
+use super::decor::build_decor;
 use super::kits::{build_kit, WALL_Z};
 use super::level::{build_level, wall_mesh};
 use super::props::{brazier_meshes, pick_spots, Flame};
 use super::style::style;
 use super::texture::stone_grain;
-use super::{KeyLight, RimLight, RoomVisual};
+use super::{KeyLight, Mote, RimLight, RoomVisual};
 use crate::rig::meshkit::hash3;
 use crate::scene::MainCamera;
 
@@ -215,7 +216,30 @@ pub fn rebuild_room(
             });
     }
 
-    // Drifting motes deeper in the room.
+    // Growth, rubble, stalactites and chains.
+    let decor = build_decor(&grid, def.theme, seed);
+    for (m, base) in [
+        (decor.growth, Color::WHITE),
+        (decor.rubble, Color::srgb(0.85, 0.85, 0.9)),
+        (decor.hangers, Color::srgb(0.9, 0.9, 0.95)),
+    ] {
+        if m.vertex_count() == 0 {
+            continue;
+        }
+        commands.spawn((
+            RoomVisual,
+            NotShadowCaster,
+            Mesh3d(meshes.add(m.to_mesh())),
+            MeshMaterial3d(mats.add(StandardMaterial {
+                base_color: base,
+                perceptual_roughness: 0.9,
+                ..default()
+            })),
+            Transform::IDENTITY,
+        ));
+    }
+
+    // Motes drifting through the air.
     let mote_mesh = meshes.add(Sphere::new(0.07));
     let mote = mats.add(StandardMaterial {
         base_color: st.mote,
@@ -223,13 +247,21 @@ pub fn rebuild_room(
         unlit: true,
         ..default()
     });
-    for k in 0..26 {
+    let count = ((grid.width() as f32 * grid.height() as f32) / 40.0).clamp(24.0, 70.0) as i32;
+    for k in 0..count {
         let x = hash3(seed, k, 0, 41) * grid.width() as f32;
-        let y = 2.0 + hash3(seed, k, 1, 41) * (grid.height() as f32 - 3.0).max(1.0);
+        let span = 4.0 + hash3(seed, k, 1, 41) * 6.0;
+        let y = 1.5 + hash3(seed, k, 3, 41) * (grid.height() as f32 - span - 1.0).max(1.0);
         let z = -0.5 - hash3(seed, k, 2, 41) * 2.6;
         commands.spawn((
             RoomVisual,
             NotShadowCaster,
+            Mote {
+                base: Vec3::new(x, y, z),
+                phase: hash3(seed, k, 4, 41),
+                rise: 0.18 + 0.3 * hash3(seed, k, 5, 41),
+                span,
+            },
             Mesh3d(mote_mesh.clone()),
             MeshMaterial3d(mote.clone()),
             Transform::from_xyz(x, y, z),
