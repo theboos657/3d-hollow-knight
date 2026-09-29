@@ -60,8 +60,9 @@ move, Z jump, X attack, C dash).
 | Debug overlay | F1 | |
 
 Every key can be rebound in **Options -> Controls**. Volumes, screen shake, vsync and
-**Graphics** (Low / Medium / High) are in Options too; they are kept in
-`saves/settings.ron`. Short prompts teach the controls as they become useful and use
+**Graphics** (Low / Medium / High / **Ultra**, the default) are in Options too; they are kept
+in `saves/settings.ron`. If Ultra runs too slowly or looks wrong on your machine, drop to
+High there (or start with `cargo play -- --quality high`). Short prompts teach the controls as they become useful and use
 your own keys.
 
 ## How to read the game
@@ -106,10 +107,11 @@ cargo run -p hk_game --features dev    # faster rebuilds (dynamic linking; Linux
 (developer start: nothing is saved; add `--all` to unlock every move; `sandbox`,
 `dev_matron` and `dev_bellwarden` are test rooms), `--new` ignores the save, `--bot`
 lets the boss-fight bot play, `--boss-hp-pct N` starts a boss fight late,
-`--quality low|medium|high` overrides the graphics tier for one run, `--show-hitboxes`
-also draws the sword's real hitbox, and `--viewer` (with `--viewer-set
-enemies|husk|wisp|shield|spitter|dummy|matron|warden` and `--viewer-cols 0,3,4`) lays
-every model out in its poses with no game running.
+`--quality low|medium|high|ultra` overrides the graphics tier for one run,
+`--show-hitboxes` also draws the sword's real hitbox, and `--viewer` (with `--viewer-set
+knight|enemies|husk|wisp|shield|spitter|dummy|matron|warden|materials` and
+`--viewer-cols 0,3,4`) lays every model, or every generated material, out with no game
+running.
 
 **Feel numbers** live in `assets/tuning/*.ron` (jump height, dash speed, coyote time,
 boss attack timings, camera lead...). They are read at startup, so edit and restart:
@@ -148,12 +150,25 @@ Nothing is loaded from disk: every model, texture and HUD picture is built in co
   rears back before it lunges, the Wisp squeezes small then dives, the Shieldbearer
   draws its shield in and shows a glowing weak spot, the Spitter's belly swells. The
   tell colours are unchanged and now come with a shape, so a tell is never only a colour.
-* **The world** is laid stone (chamfered blocks, lit near open air and dark deep in the
-  rock), lit halls with a shadow-casting key light, per-area architecture (ashen nave
-  arches, giant glowing mushrooms, hanging bells, stained glass, colossal ribs),
+* **The world** is made of real-looking materials: every surface (stone, moss, timber,
+  masonry, bronze, iron, bone, chitin, flesh, cloth, leather, steel) has a generated colour,
+  normal, roughness/metal/occlusion, height and glow map (`look/pbr.rs`; there are no
+  downloaded textures). Stone is chiselled blocks near open air with relief that shifts
+  as you move (parallax), one swelling cliff face deep in the rock; each area has its own
+  wetness (puddles that mirror the light, drips that fall and splash), architecture
+  (ashen nave arches, giant waxy mushrooms, cast bells, stained glass, colossal ribs),
   braziers that pool light, drifting motes, growth, rubble and stalactites.
-* **Graphics tiers**: Low (no shadows, FXAA), Medium (default: shadows, SMAA), High
-  (bigger shadows, sharper edges, ambient occlusion).
+* **Creatures** are sculpted (noise-displaced geometry with matching normals), not maths
+  solids: the Husk has overlapping lacquered plates with glowing seams, thorns and a
+  browed skull; the Wisp is real glass round a burning nucleus; the Shieldbearer is worn,
+  riveted plate; the Spitter is wet translucent flesh; the Matron wears a hide of moss;
+  the Bellwarden is cast bronze with studs and real chain links. Tells, poses and hurtboxes
+  are unchanged.
+* **Graphics tiers**: Low (no shadows, FXAA), Medium (shadows, SMAA, parallax stone), High
+  (4096 shadows, SMAA high, ambient occlusion, a generated environment map for reflections
+  and ambient colour), **Ultra** (default: 8192 soft shadows, temporal anti-aliasing with
+  sharpening, top-quality ambient occlusion, volumetric haze with fires and the lantern
+  glowing in it, depth of field, edge fringing, film grain).
 
 ### Layout
 
@@ -161,8 +176,9 @@ Nothing is loaded from disk: every model, texture and HUD picture is built in co
 crates/hk_sim    the whole game, no rendering: 120 Hz fixed-step simulation
 crates/hk_game   the Bevy app: draws and hears the simulation, menus, HUD
                    rig/      geometry (meshkit) and animation maths (pose, creature)
-                   models/   knight, enemies, bosses, projectiles
-                   look/     level stone, area kits, decor, lights, doors and benches
+                   models/   knight, enemies (geo.rs: their geometry), bosses, projectiles
+                   look/     materials (pbr), level stone, area kits, decor, lights, doors and
+                             benches, wetness, tiers (quality), environment light (ibl), grain
                    viewer, title_scene, hud_art, tutorial, vfx
 crates/hk_tools  lint_rooms, bench_sim, dump_tuning
 assets/          tuning/*.ron, rooms/*.room.ron, audio/ (generated)

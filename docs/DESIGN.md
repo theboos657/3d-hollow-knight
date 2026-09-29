@@ -196,23 +196,56 @@ hitstop; a test builds a real simulation, swings in every direction, and checks 
 passes through the live hitbox on every tick it exists (0.3 u slack), so retuning the reach in
 `combat.ron` cannot desynchronise the picture.
 
-**The level.** `look/level.rs` turns tiles into chamfered blocks whose brightness falls off with
-distance from open air; `look/kits.rs` builds each area's architecture at three depths in front of
-a chamber wall (parallax from the real perspective camera); `look/decor.rs` adds growth, rubble
-and stalactites (taller behind the play lane than in front of it, so the knight's feet stay
-visible); `look/style.rs` holds every area's palette and grading (tests keep ledges readable and
-areas distinguishable). Everything is seeded from the room id.
+**Materials.** `look/pbr.rs` generates, in code, a full map set for each of thirteen materials
+(rock, masonry, moss, wood, bronze, iron, cloth, burlap, bone, chitin, flesh, leather, steel):
+colour, a tangent-space normal map (from the height field, so light rakes across pits, seams and
+grain), an ORM map (occlusion / roughness / metal), a height map (parallax) and a glow mask,
+each with a full mip chain, built from tileable value / Worley / ridged / warped noise on worker
+threads at startup (about 3 s for all thirteen at release sizes on 4 cores; 1024 px for the big
+three, 512 px for the rest; smaller in debug builds). The maps are mid-grey and the palette tints
+them, so every area keeps its colours. Meshes get mikktspace tangents (`to_mesh_pbr`); surfaces
+without meaningful UVs (kits, planks, fixtures) are box-mapped at a fixed texel density
+(`MeshData::box_mapped`). Glow maps never drop below 0.2, so a creature's body can take its tell
+colour as an even wash while its veins and seams glow up to five times brighter.
+
+**The level.** `look/level.rs` turns tiles into blocks: near open air they are chiselled slabs
+(each face slightly tilted and dished, its own grain window, chipped corners, a real groove
+between them); deep in the rock they are one swelling surface with world-continuous grain and a
+hairline seam, so a mass reads as a cliff, not a floor of tiles. The chamber wall recedes in relief
+behind the windows. `look/kits.rs` builds each area's architecture at three depths in front of
+the wall, split by material (masonry, fungus, roots, bone, iron, bronze, cloth); `look/decor.rs`
+adds growth, rubble and stalactites (taller behind the play lane than in front of it, so the
+knight's feet stay visible); `look/wet.rs` adds puddles and drips in proportion to each area's
+wetness; `look/style.rs` holds every area's palette, roughness, wetness and grading (tests keep
+ledges readable and areas distinguishable). Everything is seeded from the room id.
+
+**Creatures.** `models/geo.rs` builds every ordinary creature's geometry (`bosses.rs` the
+bosses'): lathes, tubes and curved thorns, then `sculpted` (noise displacement along the normals
+by position, so seams stay closed, with the normals bent to match). Materials are the generated
+sets; the Wisp is real glass (specular transmission), the Spitter and mushrooms are waxy flesh
+with a little diffuse transmission. Tell colours, poses and hurtbox sizes are exactly as before.
 
 **Lighting.** A shadow-casting key light tinted per area, a weak cool rim light, per-area ambient
 and colour grading, flickering braziers, the knight's own lantern, bench and door lights, and
 additive light shafts. Level stone and one-way planks do not cast shadows (a ceiling's shadow
-lands on the wall as a black bar); actors and props do.
+lands on the wall as a black bar); actors and props do. On High and Ultra a small generated
+environment map per area (a dim gradient hall with a few bright soft windows, `look/ibl.rs`)
+is filtered by Bevy into diffuse and specular ambient light, replacing most of the flat ambient
+colour: wet stone, bronze and steel now reflect something, and every surface is lit from the right
+direction. On Ultra a haze volume fills each hall and every point light (fires, lantern excepted,
+bolts) glows in it; the knight's lantern sits on the view ray and would blow the scattering up
+into a black speck, so it does not.
 
 **Camera** distance 23.2 -> 19.5 so characters read at a glance (the knight was ~68 px tall at
 720p before; the visible height is now about 13.4 u, still enough to see a full jump).
 
-**Graphics tiers** are in `look/quality.rs`: Low (no shadows, FXAA), Medium (2048 shadows, SMAA,
-the default), High (4096 shadows, SMAA high, SSAO).
+**Graphics tiers** are in `look/quality.rs`, a table of independent flags (`Plan`), so any
+feature can be dropped without touching the others: Low (no shadows, FXAA); Medium (2048 shadows,
+SMAA, parallax stone); High (4096 shadows, SMAA high, SSAO, environment light); **Ultra**, the
+default (8192 soft temporal shadows, temporal AA with contrast-adaptive sharpening, top-quality
+SSAO, volumetric haze, a depth-of-field lens held on the play lane, chromatic fringing, film
+grain). Tests pin that each tier buys more than the last and that temporal features only come
+with temporal AA. Older settings files (which saved the choice as `quality`) come up on Ultra.
 
 **Teaching.** `tutorial.rs` replaces a paragraph of controls with prompts shown at the moment they
 matter (move, strike, the tell colours, pogo, bench, focus, dash, grip), using the player's own key
@@ -237,7 +270,11 @@ Not verifiable in the environment this was built in (no GPU, no speakers, no hum
 how the rooms *play* (enemy placement, pacing), how hard the bosses are for a person, how the
 music sounds, perceived input latency, how the animation looks *in motion*, frame rate on real
 hardware, and behaviour on your GPU/OS. The art was checked frame by frame through a software
-renderer and by unit tests of its geometry and animation maths.
+renderer and by unit tests of its geometry and animation maths. That applies with extra force to
+**Ultra**: its temporal effects (TAA, soft shadows, SSAO denoising) need many frames to converge,
+so a software-rendered still shows them as speckle; how Ultra actually looks and performs at 60+
+fps, and whether any effect misbehaves on your GPU, is unknown until you run it. Every Ultra feature
+is a separate flag, so if one misbehaves it can be dropped without losing the rest.
 
 ## 10. Playtest checklist
 
@@ -286,8 +323,11 @@ All in `assets/tuning/*.ron`, no rebuild needed.
 
 ## 11. Known limitations
 
-* Art is procedural: stylised and readable, but built from code shapes, not hand-sculpted;
-  animation is pose maths (no keyframed clips); nothing was seen moving before it was shipped.
+* Art is procedural: the materials are generated from noise (convincing surface response, but
+  not photo scans) and the creatures are sculpted by noise, not by an artist; animation is pose
+  maths (no keyframed clips); nothing was seen moving before it was shipped.
+* Materials are baked at startup (about a second on a fast CPU at release sizes); Ultra is
+  heavy by design and unmeasured on real hardware.
 * Walk and run cycles are simple leg swings; there is no foot-planting on slopes (there are no slopes).
 * Rebinding is keyboard only; the gamepad layout is fixed.
 * One save slot. No map screen.
