@@ -294,3 +294,104 @@ fn ground_creatures_stand_on_solid_ground() {
         bad.join("\n")
     );
 }
+
+// -------------------------------------------------------------------- doors --
+
+/// Every door in the world, actually walked through in the real simulation:
+/// the fade, the swap, arriving where the destination says, and staying there.
+#[test]
+fn every_door_leads_where_it_says_and_you_arrive_safely() {
+    use bevy_ecs::prelude::*;
+    use hk_sim::components::SimPos;
+    use hk_sim::player::spawn_player;
+    use hk_sim::testing::Harness;
+    use hk_sim::world::room::{enter_room, CurrentRoom, Transition};
+
+    let lib = library();
+    // Creatures would only get in the way of measuring the doors; bosses stay
+    // (a boss room must be safe to walk into).
+    let quiet = |mut d: RoomDef| {
+        d.spawns
+            .retain(|s| matches!(s.kind, SpawnKind::Matron | SpawnKind::Bellwarden));
+        d
+    };
+    let defs: Vec<RoomDef> = lib
+        .ids()
+        .into_iter()
+        .filter(|i| !matches!(*i, "sandbox" | "dev_matron" | "dev_bellwarden"))
+        .map(|i| quiet(lib.get(i).unwrap().clone()))
+        .collect();
+    let mut checked = 0;
+    for def in &defs {
+        for (xi, exit) in def.exits.iter().enumerate() {
+            let mut h = Harness::new();
+            h.world_mut().insert_resource(tuning());
+            h.world_mut()
+                .insert_resource(RoomLibrary::from_defs(defs.clone()));
+            let p = spawn_player(h.world_mut(), Vec2::ZERO, BOTH);
+            let start = &def.entries[0];
+            // Leaving a boss room means the boss is already beaten (its doors
+            // are sealed during the fight).
+            for (i, s) in def.spawns.iter().enumerate() {
+                if s.persistent {
+                    h.world_mut()
+                        .resource_mut::<WorldFlags>()
+                        .defeated
+                        .insert(def.spawn_tag(i));
+                }
+            }
+            enter_room(h.world_mut(), &def.id, &start.name).unwrap();
+            h.tick_n(3);
+
+            // Walk into the doorway: stand in the middle of the exit's rectangle.
+            let (rx, ry, rw, rh) = exit.rect;
+            h.world_mut().get_mut::<SimPos>(p).unwrap().0 = Vec2::new(rx + rw * 0.5, ry + rh * 0.5);
+            let mut guard = 0;
+            while h.world().resource::<CurrentRoom>().id == def.id {
+                h.tick();
+                guard += 1;
+                assert!(
+                    guard < 200,
+                    "{} exit #{xi} to {} never fired",
+                    def.id,
+                    exit.to
+                );
+            }
+            let dest = defs.iter().find(|d| d.id == exit.to).unwrap();
+            let entry = dest.entry(&exit.entry).unwrap();
+            let at = h.world().get::<SimPos>(p).unwrap().0;
+            assert!(
+                (at.x - entry.at.0).abs() < 0.01,
+                "{} -> {}: arrived at x {} not {}",
+                def.id,
+                exit.to,
+                at.x,
+                entry.at.0
+            );
+
+            // Then live there for a second: no bouncing back, no damage, and
+            // not left inside anything.
+            h.tick_n(200);
+            assert!(!h.world().resource::<Transition>().active());
+            assert_eq!(
+                h.world().resource::<CurrentRoom>().id,
+                exit.to,
+                "{} -> {}: bounced straight back out",
+                def.id,
+                exit.to
+            );
+            let hp = h.world().get::<hk_sim::combat::Health>(p).unwrap();
+            assert_eq!(hp.hp, hp.max, "{} -> {}: hurt on arrival", def.id, exit.to);
+            let end = h.world().get::<SimPos>(p).unwrap().0;
+            assert!(
+                end.y > 0.0 && end.y < dest.height() as f32,
+                "{} -> {}: ended up outside the room at {end:?}",
+                def.id,
+                exit.to
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, defs.iter().map(|d| d.exits.len()).sum::<usize>());
+    assert!(checked >= 30, "only {checked} doors checked");
+}
