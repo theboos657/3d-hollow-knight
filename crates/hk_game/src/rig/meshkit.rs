@@ -47,6 +47,14 @@ impl MeshData {
         self.idx.extend([a, b, c]);
     }
 
+    /// Appends one flat quad. `p` are its corners, counter-clockwise seen from
+    /// the side `n` points to; `col` are the per-corner vertex colours.
+    pub fn add_quad(&mut self, p: [Vec3; 4], n: Vec3, uv: [Vec2; 4], col: [[f32; 4]; 4]) {
+        let ids: Vec<u32> = (0..4).map(|i| self.push(p[i], n, uv[i], col[i])).collect();
+        self.tri(ids[0], ids[1], ids[2]);
+        self.tri(ids[0], ids[2], ids[3]);
+    }
+
     /// Appends `other` (already in this mesh's space).
     pub fn merge(&mut self, other: &MeshData) {
         let base = self.pos.len() as u32;

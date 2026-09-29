@@ -1,7 +1,7 @@
 // Camera rig. Times in ms, distances in world units (1 tile).
 (
     fov_deg: 38.0,
-    distance: 23.2,
+    distance: 19.5,
     follow_x_ms: 120.0,
     follow_y_ms: 250.0,
     deadzone_half_y: 1.25,

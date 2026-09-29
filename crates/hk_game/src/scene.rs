@@ -3,10 +3,11 @@
 //! depths so the perspective camera gives true parallax.
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
-use bevy::render::view::Hdr;
+use bevy::render::view::{ColorGrading, Hdr};
 
 pub struct ScenePlugin;
 
@@ -21,10 +22,10 @@ impl Plugin for ScenePlugin {
     }
 }
 
-/// Camera field of view and distance, chosen so ~16 world units are visible
-/// vertically at the z = 0 lane: d = 8 / tan(fov / 2).
+/// Camera field of view and distance, chosen so ~13.4 world units are visible
+/// vertically at the z = 0 lane: d = 6.7 / tan(fov / 2).
 pub const FOV_DEG: f32 = 38.0;
-pub const CAM_DIST: f32 = 23.2;
+pub const CAM_DIST: f32 = 19.5;
 
 #[derive(Component)]
 pub struct MainCamera;
@@ -82,15 +83,37 @@ fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMateria
 }
 
 fn spawn_camera_and_lights(mut commands: Commands) {
-    // Cool rim/key light from behind-above.
+    // The key light: from above-left and in front, so ledges catch a highlight
+    // and everything on the play lane throws a shadow on the wall behind.
+    // (Its colour and strength are set per area by `look::room`.)
     commands.spawn((
+        crate::look::KeyLight,
         DirectionalLight {
-            illuminance: 3500.0,
-            color: Color::srgb(0.55, 0.68, 1.0),
+            illuminance: 5000.0,
+            color: Color::srgb(1.0, 0.9, 0.8),
+            shadows_enabled: true,
+            ..default()
+        },
+        CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            minimum_distance: 0.1,
+            maximum_distance: 60.0,
+            first_cascade_far_bound: 60.0,
+            overlap_proportion: 0.0,
+        }
+        .build(),
+        Transform::from_xyz(-3.0, 6.5, 10.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+    ));
+    // A weak cool light from the other side, so silhouettes keep an edge.
+    commands.spawn((
+        crate::look::RimLight,
+        DirectionalLight {
+            illuminance: 900.0,
+            color: Color::srgb(0.5, 0.6, 1.0),
             shadows_enabled: false,
             ..default()
         },
-        Transform::from_xyz(-4.0, 8.0, 6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_xyz(6.0, 3.0, -4.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
     ));
 
     commands.spawn((
@@ -104,6 +127,7 @@ fn spawn_camera_and_lights(mut commands: Commands) {
         Transform::from_xyz(4.0, 8.0, CAM_DIST).looking_at(Vec3::new(4.0, 8.0, 0.0), Vec3::Y),
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
+        ColorGrading::default(),
         DistanceFog {
             color: Color::srgb(0.015, 0.02, 0.035),
             falloff: FogFalloff::Linear {
@@ -113,39 +137,4 @@ fn spawn_camera_and_lights(mut commands: Commands) {
             ..default()
         },
     ));
-}
-
-/// Layered background slabs and glowing motes across `width` world units.
-/// Every spawned entity also gets `marker` so the caller can tear it down.
-pub fn spawn_backdrop<M: Bundle + Clone>(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    backdrop: &Handle<StandardMaterial>,
-    glow: &Handle<StandardMaterial>,
-    marker: M,
-    width: f32,
-) {
-    for (z, count, h) in [(-6.0, 12, 10.0), (-14.0, 10, 16.0), (-30.0, 8, 26.0)] {
-        for i in 0..count {
-            let t = i as f32 / (count - 1) as f32;
-            let x = -10.0 + t * (width + 20.0) + (i as f32 * 3.7).sin() * 3.0;
-            let w = 4.0 + (i % 3) as f32 * 2.5;
-            commands.spawn((
-                marker.clone(),
-                Mesh3d(meshes.add(Cuboid::new(w, h, 3.0))),
-                MeshMaterial3d(backdrop.clone()),
-                Transform::from_xyz(x, h * 0.5 - 1.0, z),
-            ));
-        }
-    }
-    for i in 0..14 {
-        let x = i as f32 * width / 13.0;
-        let y = 4.0 + ((i * 7) % 11) as f32;
-        commands.spawn((
-            marker.clone(),
-            Mesh3d(meshes.add(Sphere::new(0.16))),
-            MeshMaterial3d(glow.clone()),
-            Transform::from_xyz(x, y, -4.0 - (i % 4) as f32 * 2.0),
-        ));
-    }
 }

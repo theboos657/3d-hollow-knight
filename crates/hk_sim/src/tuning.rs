@@ -652,7 +652,7 @@ impl Default for CameraTuning {
     fn default() -> Self {
         Self {
             fov_deg: 38.0,
-            distance: 23.2,
+            distance: 19.5,
             follow_x_ms: 120.0,
             follow_y_ms: 250.0,
             deadzone_half_y: 1.25,
@@ -1056,9 +1056,11 @@ mod tests {
     }
 
     #[test]
-    fn camera_view_is_about_16_units_tall() {
+    fn camera_view_is_about_13_and_a_half_units_tall() {
+        // Close enough that the characters read at a glance (they were ~68 px
+        // tall at 720p when 16 units were visible), far enough to see a jump.
         let h = CameraTuning::default().half_view_height() * 2.0;
-        assert!((h - 16.0).abs() < 0.2, "visible height {h}");
+        assert!((h - 13.4).abs() < 0.2, "visible height {h}");
     }
 
     #[test]

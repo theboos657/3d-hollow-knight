@@ -167,7 +167,7 @@ routes), so it can call something unreachable that an expert can do, never the r
 
 ## 7. Camera
 
-A perspective camera (FOV 38, 23.2 u away, about 16 u visible height at the play plane).
+A perspective camera (FOV 38, 19.5 u away, about 13.4 u visible height at the play plane, so the characters read larger).
 Critically damped follow (x 120 ms, y 250 ms) with a vertical dead zone so jumps don't bob the
 view; a 3.5 u lookahead that flips only after 250 ms of consistent direction; hold Up/Down for
 0.5 s to look 4 u; a look-down that grows as you fall; the frustum footprint at z = 0 is clamped

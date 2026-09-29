@@ -16,6 +16,7 @@ mod demo;
 mod devices;
 mod hud;
 mod interp;
+mod look;
 mod menu;
 mod models;
 mod rig;
@@ -134,6 +135,7 @@ fn main() {
             vfx::VfxPlugin,
             models::knight::KnightPlugin,
             models::enemies::EnemyModelsPlugin,
+            look::LookPlugin,
         ),
         boss_view::BossViewPlugin,
         toast::ToastPlugin,
