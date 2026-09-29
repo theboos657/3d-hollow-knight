@@ -636,16 +636,17 @@ pub fn texel(kind: Kind, u: f32, v: f32) -> Texel {
             let (p1, _, pid) = worley(s + 2, u, v, 26);
             let pit = 1.0 - smoothstep(0.0, 0.16, p1);
             let blotch = fbm(s + 3, u, v, 4, 5, 0.55);
-            let corr = smoothstep(0.50, 0.72, blotch + 0.15 * pid * pit);
+            let corr = smoothstep(0.60, 0.80, blotch + 0.20 * pid * pit);
             let (metal_c, corr_c, rough_m): ([f32; 3], [f32; 3], f32) = match kind {
                 Kind::Bronze => ([0.72, 0.47, 0.22], [0.16, 0.42, 0.34], 0.36),
                 Kind::Iron => ([0.30, 0.30, 0.33], [0.40, 0.19, 0.08], 0.52),
                 _ => ([0.72, 0.74, 0.78], [0.42, 0.38, 0.34], 0.26),
             };
-            let corr = if kind == Kind::Steel {
-                corr * 0.25
-            } else {
-                corr
+            // Steel barely corrodes, bronze goes green in patches, iron rusts.
+            let corr = match kind {
+                Kind::Steel => corr * 0.25,
+                Kind::Bronze => corr * 0.7,
+                _ => corr,
             };
             let h = 0.55 + 0.10 * (scratch - 0.5) + 0.05 * (fine - 0.5) - 0.28 * pit - 0.12 * corr;
             let c = mix3(scale3(metal_c, 0.85 + 0.3 * scratch), corr_c, corr);
@@ -723,27 +724,26 @@ pub fn texel(kind: Kind, u: f32, v: f32) -> Texel {
             }
         }
         Kind::Chitin => {
-            // Armour plates: domed cells with deep seams that glow from within.
+            // Lacquered armour plates: domed cells, thin seams that glow from
+            // within, faint growth lines across each plate.
             let (wu, wv) = warp(s, u, v, 0.03, 4);
-            let (f1, f2, id) = worley(s, wu, wv, 7);
-            let seam = 1.0 - smoothstep(0.0, 0.10, f2 - f1);
+            let (f1, f2, id) = worley(s, wu, wv, 6);
+            let seam = 1.0 - smoothstep(0.0, 0.055, f2 - f1);
             let dome = 1.0 - smoothstep(0.0, 0.85, f1);
-            let ridge = (f1 * 22.0).sin() * 0.5 + 0.5;
+            let growth = (f1 * 30.0).sin() * 0.5 + 0.5;
             let micro = fbm(s + 1, u, v, 48, 3, 0.55);
-            let h = 0.30 + 0.55 * dome.powf(0.7) - 0.45 * seam + 0.04 * ridge * dome + 0.05 * micro;
-            let plate = mix3([0.10, 0.07, 0.06], [0.22, 0.13, 0.08], id);
-            let c = mix3(
-                scale3(plate, 0.7 + 0.6 * micro),
-                [0.55, 0.22, 0.05],
-                seam * 0.55,
-            );
+            let h =
+                0.30 + 0.55 * dome.powf(0.7) - 0.50 * seam + 0.05 * growth * dome + 0.04 * micro;
+            let plate = mix3([0.040, 0.032, 0.034], [0.115, 0.070, 0.050], id);
+            let sheen = 0.75 + 0.5 * micro + 0.25 * dome * growth;
+            let c = mix3(scale3(plate, sheen), [0.60, 0.22, 0.04], seam * 0.75);
             Texel {
                 height: h.clamp(0.0, 1.0),
                 albedo: c,
-                roughness: (0.28 + 0.35 * micro + 0.3 * seam).clamp(0.15, 1.0),
-                metallic: 0.08,
-                occlusion: 1.0 - 0.6 * seam,
-                glow: seam.powf(1.5),
+                roughness: (0.20 + 0.32 * micro + 0.35 * seam).clamp(0.15, 1.0),
+                metallic: 0.10,
+                occlusion: 1.0 - 0.65 * seam,
+                glow: seam.powf(1.3),
             }
         }
         Kind::Flesh => {
@@ -785,9 +785,18 @@ pub fn texel(kind: Kind, u: f32, v: f32) -> Texel {
     }
 }
 
+/// Every glow map has at least this much glow everywhere, so a creature whose
+/// body takes a tell colour (the emissive colour multiplies the map) is washed
+/// evenly and its veins and seams glow brighter than the rest.
+pub const EMISSIVE_FLOOR: f32 = 0.2;
+
 /// Generates the maps of `kind` at `size` x `size`.
 pub fn generate(kind: Kind, size: usize) -> PbrMaps {
-    let texels = evaluate(size, &|u, v| texel(kind, u, v));
+    let texels = evaluate(size, &|u, v| {
+        let mut t = texel(kind, u, v);
+        t.glow = EMISSIVE_FLOOR + (1.0 - EMISSIVE_FLOOR) * t.glow;
+        t
+    });
     bake(size, &texels, kind.bump())
 }
 

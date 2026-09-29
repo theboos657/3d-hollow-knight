@@ -150,6 +150,37 @@ impl MeshData {
         self
     }
 
+    /// Scales the texture coordinates (`su` around, `sv` along a lathe or tube),
+    /// so a surface map repeats as often as its features want to.
+    pub fn uv_scaled(mut self, su: f32, sv: f32) -> MeshData {
+        for uv in &mut self.uv {
+            uv[0] *= su;
+            uv[1] *= sv;
+        }
+        self
+    }
+
+    /// Sculpts the surface: every vertex moves along its normal by fractal noise
+    /// of its *position* (`amp` is the peak displacement, `freq` the number of
+    /// features per unit, so seams stay closed), and the normals are bent to
+    /// match, so the lumps catch the light instead of just moving.
+    pub fn sculpted(mut self, seed: u32, amp: f32, freq: f32, octaves: u32) -> MeshData {
+        let field = |q: Vec3| (fbm3(seed, q * freq, octaves) - 0.5) * 2.0;
+        let e = 0.01 / freq.max(1.0);
+        for (p, n) in self.pos.iter_mut().zip(self.nrm.iter_mut()) {
+            let (q, nv) = (Vec3::from(*p), Vec3::from(*n));
+            let grad = Vec3::new(
+                field(q + Vec3::X * e) - field(q - Vec3::X * e),
+                field(q + Vec3::Y * e) - field(q - Vec3::Y * e),
+                field(q + Vec3::Z * e) - field(q - Vec3::Z * e),
+            ) / (2.0 * e);
+            let tangential = grad - nv * grad.dot(nv);
+            *p = (q + nv * amp * field(q)).to_array();
+            *n = (nv - tangential * amp).normalize_or_zero().to_array();
+        }
+        self
+    }
+
     #[cfg(test)]
     pub fn bounds(&self) -> (Vec3, Vec3) {
         let mut lo = Vec3::splat(f32::MAX);
@@ -257,6 +288,34 @@ pub fn hash3(seed: u32, x: i32, y: i32, z: i32) -> f32 {
     (h & 0x00FF_FFFF) as f32 / 16_777_216.0
 }
 
+/// Smooth 3D value noise in `[0, 1]` (trilinear, eased), from [`hash3`].
+pub fn noise3(seed: u32, p: Vec3) -> f32 {
+    let (f, t) = (p.floor(), p - p.floor());
+    let (ix, iy, iz) = (f.x as i32, f.y as i32, f.z as i32);
+    let ease = |x: f32| x * x * (3.0 - 2.0 * x);
+    let (tx, ty, tz) = (ease(t.x), ease(t.y), ease(t.z));
+    let h = |dx: i32, dy: i32, dz: i32| hash3(seed, ix + dx, iy + dy, iz + dz);
+    let lerp = |a: f32, b: f32, k: f32| a + (b - a) * k;
+    let x00 = lerp(h(0, 0, 0), h(1, 0, 0), tx);
+    let x10 = lerp(h(0, 1, 0), h(1, 1, 0), tx);
+    let x01 = lerp(h(0, 0, 1), h(1, 0, 1), tx);
+    let x11 = lerp(h(0, 1, 1), h(1, 1, 1), tx);
+    lerp(lerp(x00, x10, ty), lerp(x01, x11, ty), tz)
+}
+
+/// Fractal sum of [`noise3`]: each octave twice as fine and half as strong;
+/// about `[0, 1]`.
+pub fn fbm3(seed: u32, p: Vec3, octaves: u32) -> f32 {
+    let (mut sum, mut amp, mut norm, mut q) = (0.0, 1.0, 0.0, p);
+    for o in 0..octaves.max(1) {
+        sum += amp * noise3(seed.wrapping_add(o * 1013), q);
+        norm += amp;
+        amp *= 0.5;
+        q *= 2.0;
+    }
+    sum / norm
+}
+
 // ------------------------------------------------------------------ lathe --
 
 /// Revolves a profile of `(radius, y)` points (listed bottom to top, on the
@@ -290,9 +349,15 @@ pub fn lathe(profile: &[(f32, f32)], radial: usize) -> MeshData {
             let phi = TAU * j as f32 / radial as f32;
             let (s, c) = phi.sin_cos();
             let n2 = normals2[i];
+            // A pole faces straight along its axis from every column.
+            let normal = if r <= 1e-6 {
+                Vec3::new(0.0, n2.y.signum(), 0.0)
+            } else {
+                Vec3::new(n2.x * c, n2.y, n2.x * s).normalize_or_zero()
+            };
             m.push(
                 Vec3::new(r * c, y, r * s),
-                Vec3::new(n2.x * c, n2.y, n2.x * s).normalize_or_zero(),
+                normal,
                 Vec2::new(j as f32 / radial as f32, run / total),
                 WHITE,
             );
@@ -770,6 +835,64 @@ mod tests {
             let (dp, du) = ((p[1] - p[0]).length(), (u[1] - u[0]).length());
             assert!((du - dp * 0.25).abs() < 1e-5, "{du} vs {dp}");
         }
+    }
+
+    #[test]
+    fn sculpting_lumps_the_surface_without_tearing_seams_or_breaking_normals() {
+        let plain = ellipsoid(0.5, 0.5, 0.5, 12, 20);
+        let lumpy = plain.clone().sculpted(3, 0.05, 3.0, 3);
+        ok("sculpted", &lumpy);
+        assert_eq!(lumpy.pos.len(), plain.pos.len());
+        // It moved, but by no more than the amplitude.
+        let mut moved = 0.0f32;
+        for (a, b) in plain.pos.iter().zip(&lumpy.pos) {
+            let d = (Vec3::from(*a) - Vec3::from(*b)).length();
+            assert!(d <= 0.05 + 1e-4, "moved {d}");
+            moved = moved.max(d);
+        }
+        assert!(moved > 0.01, "it did something: {moved}");
+        // Vertices that shared a position (the lathe's seam) still do.
+        for i in 0..plain.pos.len() {
+            for j in (i + 1)..plain.pos.len().min(i + 60) {
+                if plain.pos[i] == plain.pos[j] {
+                    // (At a pole the duplicates' normals differ a hair, so they
+                    // part by a thousandth at most; a real seam matches exactly.)
+                    let gap = (Vec3::from(lumpy.pos[i]) - Vec3::from(lumpy.pos[j])).length();
+                    assert!(gap < 2e-3, "seam torn by {gap} at {i}/{j}");
+                }
+            }
+        }
+        // Deterministic.
+        let again = plain.sculpted(3, 0.05, 3.0, 3);
+        assert_eq!(again.pos, lumpy.pos);
+    }
+
+    #[test]
+    fn noise3_is_smooth_bounded_and_varied() {
+        let mut lo = 1.0f32;
+        let mut hi = 0.0f32;
+        let mut last = noise3(1, Vec3::ZERO);
+        for k in 1..400 {
+            let v = noise3(1, Vec3::new(k as f32 * 0.01, 0.3, 0.7));
+            assert!((0.0..=1.0).contains(&v));
+            assert!((v - last).abs() < 0.08, "smooth: {last} -> {v}");
+            lo = lo.min(v);
+            hi = hi.max(v);
+            last = v;
+        }
+        assert!(hi - lo > 0.2, "varies: {lo}..{hi}");
+        assert!((0.0..=1.0).contains(&fbm3(2, Vec3::new(3.3, 1.1, 8.8), 4)));
+    }
+
+    #[test]
+    fn uv_scaling_repeats_the_map() {
+        let m = lathe(&[(0.5, 0.0), (0.5, 1.0)], 8).uv_scaled(3.0, 2.0);
+        let (mut umax, mut vmax) = (0.0f32, 0.0f32);
+        for uv in &m.uv {
+            umax = umax.max(uv[0]);
+            vmax = vmax.max(uv[1]);
+        }
+        assert!((umax - 3.0).abs() < 1e-5 && (vmax - 2.0).abs() < 1e-5);
     }
 
     #[test]

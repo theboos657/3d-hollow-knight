@@ -18,7 +18,7 @@
 //! and the pose changes as well, so it is not colour alone.
 
 use std::collections::HashMap;
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::PI;
 
 use bevy::prelude::*;
 use hk_sim::boss::{Boss, Pendulum};
@@ -29,12 +29,14 @@ use hk_sim::player::Player;
 use hk_sim::tuning::{EnemyTuning, Tuning};
 use hk_sim::SimTick;
 
+use super::geo::enemy_meshes;
+pub use super::geo::MeshList;
 use crate::interp::Interpolated;
+use crate::look::pbr::{Kind, Materials, EMISSIVE_FLOOR};
 use crate::rig::creature::{
     creature_pose, dummy, ease_guard, species_glow, spitter, step_sway, tell_glow, wisp,
     CreatureIn, CreaturePose, Species, BODY_WASH, MAX_JOINTS,
 };
-use crate::rig::meshkit::{cone, ellipsoid, extrude, lathe, limb, ring, tube, MeshData};
 use crate::rig::pose::{angle_diff, Spring};
 use crate::rig::{joint, part, posed, ModelRoot, Rest};
 
@@ -62,473 +64,6 @@ impl Plugin for EnemyModelsPlugin {
     }
 }
 
-// ---------------------------------------------------------------- geometry --
-
-fn at(x: f32, y: f32, z: f32) -> Mat4 {
-    Mat4::from_translation(Vec3::new(x, y, z))
-}
-
-/// Points a `+Y`-up primitive (a cone) along `dir`, based at `p`.
-fn aim(p: Vec3, dir: Vec3) -> Mat4 {
-    Mat4::from_translation(p) * Mat4::from_quat(Quat::from_rotation_arc(Vec3::Y, dir.normalize()))
-}
-
-/// Radius of a lathe profile at height `y` (linear between profile points).
-fn profile_r(profile: &[(f32, f32)], y: f32) -> f32 {
-    for w in profile.windows(2) {
-        let ((r0, y0), (r1, y1)) = (w[0], w[1]);
-        if y >= y0 && y <= y1 && (y1 - y0).abs() > 1e-6 {
-            return r0 + (r1 - r0) * (y - y0) / (y1 - y0);
-        }
-    }
-    profile.last().map_or(0.0, |p| p.0)
-}
-
-const HUSK_SHELL: [(f32, f32); 7] = [
-    (0.30, -0.30),
-    (0.46, -0.24),
-    (0.52, -0.05),
-    (0.49, 0.16),
-    (0.38, 0.32),
-    (0.20, 0.42),
-    (0.0, 0.46),
-];
-
-/// A crack along the shell, on one of its two flanks (`side` = +1 or -1).
-fn husk_crack(side: f32, a0: f32, wobble: [f32; 5]) -> MeshData {
-    let ys = [0.38, 0.24, 0.10, -0.04, -0.18];
-    let pts: Vec<Vec3> = ys
-        .iter()
-        .zip(wobble)
-        .map(|(&y, w)| {
-            let r = profile_r(&HUSK_SHELL, y) * 1.03;
-            let a = a0 + w;
-            Vec3::new(r * a.cos(), y, side * r * 0.92 * a.sin())
-        })
-        .collect();
-    tube(&pts, |t| 0.022 * (1.0 - 0.55 * t), 5)
-}
-
-fn husk_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    // Shell: a domed, charred carapace, darker toward the ground.
-    let shell = lathe(&HUSK_SHELL, 22)
-        .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.92)))
-        .jitter(3, 0.022)
-        .recolor(|p| {
-            let k = ((p.y + 0.30) / 0.76).clamp(0.0, 1.0);
-            let s = 0.55 + 0.45 * k;
-            [s, s * 0.95, s * 0.9, 1.0]
-        });
-    out.push(("husk_shell", shell));
-
-    // Spines down the back.
-    let mut spines = MeshData::default();
-    for (x, y, h, tilt) in [
-        (-0.12f32, 0.42f32, 0.24f32, 0.25f32),
-        (-0.27, 0.35, 0.22, 0.6),
-        (-0.39, 0.22, 0.20, 0.95),
-        (-0.47, 0.06, 0.17, 1.25),
-    ] {
-        let dir = Vec3::new(-tilt.sin(), tilt.cos(), 0.0);
-        spines.merge(&cone(0.065, h, 6).transformed(aim(Vec3::new(x, y, 0.0), dir)));
-    }
-    out.push(("husk_spines", spines));
-
-    // Glowing cracks on both flanks.
-    let mut cracks = MeshData::default();
-    for side in [1.0, -1.0] {
-        cracks.merge(&husk_crack(side, 0.95, [0.0, 0.10, -0.08, 0.12, -0.05]));
-        cracks.merge(&husk_crack(side, 1.55, [0.05, -0.12, 0.10, -0.06, 0.08]));
-        cracks.merge(&husk_crack(side, 2.15, [-0.05, 0.08, -0.10, 0.10, -0.04]));
-    }
-    out.push(("husk_cracks", cracks));
-
-    // Head: a low, forward-slung skull with two horns and a jaw.
-    let mut skull = ellipsoid(0.20, 0.16, 0.17, 10, 14).transformed(at(0.08, 0.0, 0.0));
-    for side in [-1.0f32, 1.0] {
-        skull.merge(&tube(
-            &[
-                Vec3::new(0.02, 0.10, 0.10 * side),
-                Vec3::new(-0.06, 0.22, 0.14 * side),
-                Vec3::new(-0.16, 0.28, 0.14 * side),
-            ],
-            |t| 0.035 * (1.0 - 0.8 * t),
-            6,
-        ));
-    }
-    out.push(("husk_skull", skull));
-    out.push((
-        "husk_jaw",
-        ellipsoid(0.15, 0.05, 0.13, 6, 10).transformed(at(0.14, -0.13, 0.0)),
-    ));
-    let mut eyes = ellipsoid(0.04, 0.05, 0.04, 6, 8).transformed(at(0.24, 0.04, 0.09));
-    eyes.merge(&ellipsoid(0.04, 0.05, 0.04, 6, 8).transformed(at(0.24, 0.04, -0.09)));
-    out.push(("husk_eyes", eyes));
-
-    // Arms hang down and end in three claws.
-    let arm = tube(
-        &[
-            Vec3::ZERO,
-            Vec3::new(0.10, -0.22, 0.0),
-            Vec3::new(0.26, -0.42, 0.0),
-        ],
-        |t| 0.06 - 0.03 * t,
-        7,
-    );
-    out.push(("husk_arm", arm));
-    let mut claws = MeshData::default();
-    for dz in [-0.05f32, 0.0, 0.05] {
-        claws.merge(&cone(0.028, 0.20, 6).transformed(aim(
-            Vec3::new(0.26, -0.42, dz),
-            Vec3::new(0.45 + dz * 2.0, -0.85, dz * 3.0),
-        )));
-    }
-    out.push(("husk_claws", claws));
-
-    out.push((
-        "husk_leg",
-        limb(Vec3::ZERO, Vec3::new(0.0, -0.27, 0.0), 0.075, 0.05, 7),
-    ));
-    out.push((
-        "husk_foot",
-        ellipsoid(0.13, 0.05, 0.08, 6, 10).transformed(at(0.05, -0.29, 0.0)),
-    ));
-}
-
-fn wisp_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    out.push(("wisp_orb", ellipsoid(0.38, 0.38, 0.38, 12, 22)));
-    out.push(("wisp_core", ellipsoid(0.16, 0.16, 0.16, 8, 12)));
-    // A tilted halo around the orb, and a little crown of flame-like horns.
-    out.push((
-        "wisp_halo",
-        ring(0.50, 0.018, 28, 6)
-            .transformed(Mat4::from_rotation_x(1.25) * Mat4::from_rotation_z(0.25)),
-    ));
-    let mut crown = MeshData::default();
-    for k in 0..5 {
-        let phi = k as f32 / 5.0 * std::f32::consts::TAU + 0.3;
-        let o = Vec3::new(phi.cos(), 0.0, phi.sin());
-        crown.merge(&cone(0.05, 0.20, 6).transformed(aim(
-            Vec3::new(o.x * 0.17, 0.31, o.z * 0.17),
-            o * 0.5 + Vec3::Y,
-        )));
-    }
-    out.push(("wisp_crown", crown));
-    out.push((
-        "wisp_tendril",
-        tube(
-            &[
-                Vec3::ZERO,
-                Vec3::new(0.02, -0.16, 0.0),
-                Vec3::new(-0.02, -0.32, 0.0),
-                Vec3::new(0.03, -0.48, 0.0),
-            ],
-            |t| 0.05 * (1.0 - t * 0.9),
-            6,
-        ),
-    ));
-}
-
-const BARREL: [(f32, f32); 6] = [
-    (0.30, -0.42),
-    (0.46, -0.32),
-    (0.52, -0.05),
-    (0.50, 0.22),
-    (0.40, 0.40),
-    (0.30, 0.46),
-];
-
-fn shield_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    let squash_z = Mat4::from_scale(Vec3::new(1.0, 1.0, 0.9));
-    out.push((
-        "shield_barrel",
-        lathe(&BARREL, 22)
-            .transformed(squash_z)
-            .jitter(5, 0.012)
-            .recolor(|p| {
-                let k = ((p.y + 0.42) / 0.9).clamp(0.0, 1.0);
-                let s = 0.6 + 0.4 * k;
-                [s, s, s, 1.0]
-            }),
-    ));
-    let mut bands = MeshData::default();
-    for y in [-0.28, 0.02, 0.30] {
-        bands.merge(
-            &ring(profile_r(&BARREL, y) + 0.005, 0.032, 22, 6)
-                .transformed(squash_z)
-                .transformed(at(0.0, y, 0.0)),
-        );
-    }
-    out.push(("shield_bands", bands));
-
-    // The pot helm: squat, with a slit visor and a short crest.
-    let mut helm = lathe(
-        &[
-            (0.0, 0.0),
-            (0.24, 0.0),
-            (0.28, 0.10),
-            (0.26, 0.22),
-            (0.17, 0.32),
-            (0.0, 0.36),
-        ],
-        18,
-    );
-    helm.merge(&tube(
-        &[
-            Vec3::new(0.0, 0.34, 0.0),
-            Vec3::new(-0.10, 0.44, 0.0),
-            Vec3::new(-0.24, 0.42, 0.0),
-        ],
-        |t| 0.04 * (1.0 - 0.7 * t),
-        6,
-    ));
-    out.push(("shield_helm", helm));
-    out.push((
-        "shield_visor",
-        ellipsoid(0.04, 0.03, 0.17, 6, 10).transformed(at(0.25, 0.15, 0.0)),
-    ));
-    let mut eyes = ellipsoid(0.03, 0.03, 0.035, 5, 8).transformed(at(0.285, 0.15, 0.07));
-    eyes.merge(&ellipsoid(0.03, 0.03, 0.035, 5, 8).transformed(at(0.285, 0.15, -0.07)));
-    out.push(("shield_eyes", eyes));
-
-    // The tower shield: a slab standing in the Y-Z plane (its faces look
-    // along X), with a rim, a boss and a cross of ridges on both faces.
-    let outline = [
-        Vec2::new(-0.40, 0.66),
-        Vec2::new(-0.22, 0.76),
-        Vec2::new(0.22, 0.76),
-        Vec2::new(0.40, 0.66),
-        Vec2::new(0.42, 0.0),
-        Vec2::new(0.34, -0.42),
-        Vec2::new(0.0, -0.80),
-        Vec2::new(-0.34, -0.42),
-        Vec2::new(-0.42, 0.0),
-    ];
-    // Turned a little toward the camera, so the side view still shows a face.
-    let upright = Mat4::from_rotation_y(FRAC_PI_2 - 0.35);
-    let scaled = |k: f32| outline.map(|p| p * k);
-    out.push(("shield_rim", extrude(&outline, 0.16).transformed(upright)));
-    out.push((
-        "shield_face",
-        extrude(&scaled(0.84), 0.21).transformed(upright),
-    ));
-    let mut trim = MeshData::default();
-    for side in [-1.0f32, 1.0] {
-        trim.merge(&ellipsoid(0.07, 0.15, 0.15, 6, 10).transformed(at(0.105 * side, 0.08, 0.0)));
-        trim.merge(
-            &extrude(
-                &[
-                    Vec2::new(-0.03, 0.62),
-                    Vec2::new(0.03, 0.62),
-                    Vec2::new(0.03, -0.62),
-                    Vec2::new(-0.03, -0.62),
-                ],
-                0.25,
-            )
-            .transformed(upright),
-        );
-        trim.merge(
-            &extrude(
-                &[
-                    Vec2::new(-0.34, 0.05),
-                    Vec2::new(0.34, 0.05),
-                    Vec2::new(0.34, 0.11),
-                    Vec2::new(-0.34, 0.11),
-                ],
-                0.25,
-            )
-            .transformed(upright),
-        );
-    }
-    out.push(("shield_trim", trim));
-
-    // The weak spot: a glowing vent, embedded in the barrel's flank.
-    out.push((
-        "shield_vent",
-        ellipsoid(0.07, 0.20, 0.20, 8, 12).transformed(at(0.0, 0.08, 0.0)),
-    ));
-    out.push((
-        "shield_leg",
-        limb(Vec3::ZERO, Vec3::new(0.0, -0.32, 0.0), 0.13, 0.10, 8),
-    ));
-    out.push((
-        "shield_boot",
-        ellipsoid(0.17, 0.07, 0.13, 6, 10).transformed(at(0.04, -0.35, 0.0)),
-    ));
-}
-
-fn spitter_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    let pod = lathe(
-        &[
-            (0.05, -0.30),
-            (0.26, -0.28),
-            (0.42, -0.14),
-            (0.48, 0.06),
-            (0.42, 0.24),
-            (0.26, 0.36),
-            (0.12, 0.40),
-            (0.0, 0.41),
-        ],
-        22,
-    )
-    .jitter(9, 0.02)
-    .recolor(|p| {
-        let k = ((p.y + 0.30) / 0.7).clamp(0.0, 1.0);
-        [0.62 + 0.38 * k, 0.72 + 0.28 * k, 0.6 + 0.4 * k, 1.0]
-    });
-    out.push(("spitter_pod", pod));
-    // Warts that glow: spores on both flanks.
-    let mut spots = MeshData::default();
-    for (x, y, z) in [
-        (-0.18, 0.18, 0.40),
-        (0.06, 0.28, 0.34),
-        (-0.34, -0.02, 0.32),
-        (-0.06, -0.12, 0.44),
-        (0.20, 0.05, 0.42),
-    ] {
-        for side in [1.0f32, -1.0] {
-            spots.merge(&ellipsoid(0.05, 0.05, 0.05, 5, 8).transformed(at(x, y, z * side)));
-        }
-    }
-    out.push(("spitter_spots", spots));
-    // The stalk and the flared maw (revolved about +X).
-    out.push((
-        "spitter_neck",
-        tube(
-            &[
-                Vec3::ZERO,
-                Vec3::new(0.14, 0.06, 0.0),
-                Vec3::new(0.30, 0.16, 0.0),
-                Vec3::new(0.42, 0.18, 0.0),
-            ],
-            |t| 0.12 - 0.04 * t,
-            8,
-        ),
-    ));
-    let flare = lathe(
-        &[
-            (0.06, 0.0),
-            (0.10, 0.05),
-            (0.17, 0.16),
-            (0.21, 0.24),
-            (0.18, 0.27),
-        ],
-        16,
-    )
-    .transformed(at(0.40, 0.18, 0.0) * Mat4::from_rotation_z(-FRAC_PI_2));
-    out.push(("spitter_maw", flare));
-    out.push((
-        "spitter_mouth",
-        ellipsoid(0.02, 0.13, 0.13, 6, 10).transformed(at(0.62, 0.18, 0.0)),
-    ));
-    out.push(("spitter_belly", ellipsoid(0.20, 0.20, 0.20, 8, 12)));
-    out.push((
-        "spitter_leg",
-        tube(
-            &[
-                Vec3::ZERO,
-                Vec3::new(0.05, -0.10, 0.0),
-                Vec3::new(0.02, -0.22, 0.0),
-            ],
-            |t| 0.07 - 0.03 * t,
-            6,
-        ),
-    ));
-    out.push((
-        "spitter_toe",
-        ellipsoid(0.10, 0.04, 0.07, 5, 8).transformed(at(0.04, -0.23, 0.0)),
-    ));
-}
-
-fn dummy_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    out.push((
-        "dummy_post",
-        limb(
-            Vec3::new(0.0, 0.02, 0.0),
-            Vec3::new(0.0, 0.92, 0.0),
-            0.13,
-            0.10,
-            8,
-        ),
-    ));
-    out.push((
-        "dummy_base",
-        ellipsoid(0.36, 0.08, 0.36, 6, 14).transformed(at(0.0, 0.05, 0.0)),
-    ));
-    out.push((
-        "dummy_bar",
-        limb(
-            Vec3::new(-0.50, 0.0, 0.0),
-            Vec3::new(0.50, 0.0, 0.0),
-            0.05,
-            0.05,
-            6,
-        ),
-    ));
-    let mut straw = MeshData::default();
-    for (x, sgn) in [(-0.50f32, -1.0f32), (0.50, 1.0)] {
-        for (dy, dz) in [(0.0f32, 0.0f32), (0.04, 0.05), (-0.04, -0.05)] {
-            straw.merge(&cone(0.05, 0.26, 5).transformed(aim(
-                Vec3::new(x, dy, dz),
-                Vec3::new(sgn, 0.25 + dy * 3.0, dz * 3.0),
-            )));
-        }
-    }
-    out.push(("dummy_straw", straw));
-    out.push((
-        "dummy_head",
-        ellipsoid(0.20, 0.22, 0.20, 10, 14)
-            .jitter(4, 0.012)
-            .transformed(at(0.0, 0.10, 0.0)),
-    ));
-    let mut face = ellipsoid(0.03, 0.035, 0.03, 5, 8).transformed(at(0.185, 0.16, 0.07));
-    face.merge(&ellipsoid(0.03, 0.035, 0.03, 5, 8).transformed(at(0.185, 0.16, -0.07)));
-    face.merge(&limb(
-        Vec3::new(0.19, 0.06, -0.08),
-        Vec3::new(0.19, 0.06, 0.08),
-        0.012,
-        0.012,
-        5,
-    ));
-    out.push(("dummy_face", face));
-    let mut tuft = MeshData::default();
-    for k in 0..4 {
-        let phi = k as f32 / 4.0 * std::f32::consts::TAU;
-        tuft.merge(&cone(0.045, 0.2, 5).transformed(aim(
-            Vec3::new(phi.cos() * 0.08, 0.28, phi.sin() * 0.08),
-            Vec3::new(phi.cos() * 0.5, 1.0, phi.sin() * 0.5),
-        )));
-    }
-    out.push(("dummy_tuft", tuft));
-    // The target: three flat discs on the camera-facing side of the chest.
-    let mut cream = MeshData::default();
-    let mut red = MeshData::default();
-    cream.merge(&ellipsoid(0.20, 0.20, 0.03, 8, 16).transformed(at(0.0, 0.58, 0.115)));
-    red.merge(&ellipsoid(0.135, 0.135, 0.036, 8, 16).transformed(at(0.0, 0.58, 0.117)));
-    cream.merge(&ellipsoid(0.07, 0.07, 0.04, 6, 12).transformed(at(0.0, 0.58, 0.12)));
-    out.push(("dummy_target_cream", cream));
-    out.push(("dummy_target_red", red));
-}
-
-fn shard_meshes(out: &mut Vec<(&'static str, MeshData)>) {
-    // A splinter: a three-sided spike, used for every species' death burst.
-    out.push(("shard", cone(0.10, 0.34, 3)));
-}
-
-/// Every mesh of every creature, by name (also what the tests validate).
-pub fn enemy_meshes() -> Vec<(&'static str, MeshData)> {
-    let mut out = Vec::new();
-    shard_meshes(&mut out);
-    husk_meshes(&mut out);
-    wisp_meshes(&mut out);
-    shield_meshes(&mut out);
-    spitter_meshes(&mut out);
-    dummy_meshes(&mut out);
-    super::bosses::matron_meshes(&mut out);
-    super::bosses::warden_meshes(&mut out);
-    out
-}
-
 // ------------------------------------------------------------------ assets --
 
 #[derive(Resource)]
@@ -537,13 +72,11 @@ pub struct EnemyAssets {
     mats: HashMap<&'static str, Handle<StandardMaterial>>,
 }
 
-/// A list of named meshes (what the geometry builders return).
-pub type MeshList = Vec<(&'static str, MeshData)>;
-
 /// Adds named materials to the asset map (used by the boss module too).
 pub struct MatBuilder<'a> {
     mats: &'a mut Assets<StandardMaterial>,
     map: &'a mut HashMap<&'static str, Handle<StandardMaterial>>,
+    pbr: &'a Materials,
 }
 
 impl MatBuilder<'_> {
@@ -555,6 +88,26 @@ impl MatBuilder<'_> {
     }
     pub fn glow(&mut self, k: &'static str, species: Species) {
         self.add(k, glow_material(species));
+    }
+    /// A surface with a full set of maps (`rough` scales the roughness map,
+    /// `coat` is a clear wet or lacquered layer on top).
+    pub fn skin(&mut self, k: &'static str, kind: Kind, tint: Color, rough: f32, coat: f32) {
+        let m = skin_material(self.pbr, kind, tint, rough, coat);
+        self.add(k, m);
+    }
+    /// The same, with a last adjustment (transmission, culling, ...).
+    pub fn skin_with(
+        &mut self,
+        k: &'static str,
+        kind: Kind,
+        tint: Color,
+        rough: f32,
+        coat: f32,
+        f: impl FnOnce(&mut StandardMaterial),
+    ) {
+        let mut m = skin_material(self.pbr, kind, tint, rough, coat);
+        f(&mut m);
+        self.add(k, m);
     }
 }
 
@@ -582,6 +135,24 @@ fn lit(base: Color, rough: f32, metallic: f32) -> StandardMaterial {
     }
 }
 
+/// A creature surface from a generated map set. Creatures are small, so there
+/// is no parallax (the normal map does the work).
+pub fn skin_material(
+    pbr: &Materials,
+    kind: Kind,
+    tint: Color,
+    rough: f32,
+    coat: f32,
+) -> StandardMaterial {
+    let mut m = pbr.get(kind).material();
+    m.base_color = tint;
+    m.perceptual_roughness = rough;
+    m.clearcoat = coat;
+    m.clearcoat_perceptual_roughness = 0.2;
+    m.depth_map = None;
+    m
+}
+
 /// A material for glowing parts: dark base, emissive driven per instance.
 fn glow_material(species: Species) -> StandardMaterial {
     let g = species_glow(species);
@@ -593,109 +164,157 @@ fn glow_material(species: Species) -> StandardMaterial {
     }
 }
 
+/// How much brighter than the flat wash a body's own emissive colour must be:
+/// its glow map is at least [`EMISSIVE_FLOOR`] everywhere, so scaling by the
+/// reciprocal gives the same even wash the flat bodies had, with the veins and
+/// seams (up to five times brighter) glowing through it.
+fn body_emissive_scale(species: Species) -> f32 {
+    match species {
+        Species::Husk
+        | Species::Shieldbearer
+        | Species::Spitter
+        | Species::Matron
+        | Species::Bellwarden => 1.0 / EMISSIVE_FLOOR,
+        _ => 1.0,
+    }
+}
+
 pub fn build_enemy_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    pbr: Res<Materials>,
 ) {
-    commands.insert_resource(make_assets(&mut meshes, &mut mats));
+    commands.insert_resource(make_assets(&mut meshes, &mut mats, &pbr));
 }
 
-pub fn make_assets(meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial>) -> EnemyAssets {
+pub fn make_assets(
+    meshes: &mut Assets<Mesh>,
+    mats: &mut Assets<StandardMaterial>,
+    pbr: &Materials,
+) -> EnemyAssets {
     let mesh_map = enemy_meshes()
         .into_iter()
-        .map(|(k, d)| (k, meshes.add(d.to_mesh())))
+        .map(|(k, d)| (k, meshes.add(d.to_mesh_pbr())))
         .collect();
     let mut m: HashMap<&'static str, Handle<StandardMaterial>> = HashMap::new();
-    let mut add_std = |k: &'static str, s: StandardMaterial| {
-        m.insert(k, mats.add(s));
+    let mut b = MatBuilder {
+        mats,
+        map: &mut m,
+        pbr,
     };
-    let mut add = |k: &'static str, s: StandardMaterial| add_std(k, s);
-    // Husk.
-    add("husk_shell", lit(Color::srgb(0.20, 0.13, 0.11), 0.92, 0.0));
-    add("husk_glow", glow_material(Species::Husk));
-    add("husk_flesh", lit(Color::srgb(0.30, 0.16, 0.12), 0.8, 0.0));
-    add("husk_bone", lit(Color::srgb(0.70, 0.64, 0.54), 0.6, 0.0));
-    add("husk_char", lit(Color::srgb(0.10, 0.08, 0.08), 0.9, 0.0));
-    // Wisp.
-    add(
+    let c = Color::srgb;
+    // Husk: charred chitin, a bone skull, leathery limbs.
+    b.skin("husk_shell", Kind::Chitin, c(0.9, 0.84, 0.80), 0.9, 0.55);
+    b.glow("husk_glow", Species::Husk);
+    b.skin("husk_flesh", Kind::Leather, c(0.55, 0.34, 0.27), 0.9, 0.0);
+    b.skin("husk_bone", Kind::Bone, c(1.0, 0.96, 0.88), 1.0, 0.12);
+    b.skin("husk_char", Kind::Chitin, c(0.45, 0.40, 0.38), 1.0, 0.0);
+    b.lit("husk_dark", c(0.02, 0.015, 0.015), 0.9, 0.0);
+    // Wisp: real glass around a burning core, ghost-bone horns, silky threads.
+    b.add(
         "wisp_glass",
         StandardMaterial {
-            base_color: Color::srgba(0.55, 0.42, 0.95, 0.62),
-            alpha_mode: AlphaMode::Blend,
-            perceptual_roughness: 0.12,
+            base_color: c(0.90, 0.82, 1.0),
+            perceptual_roughness: 0.05,
             reflectance: 0.6,
+            specular_transmission: 0.9,
+            ior: 1.35,
+            thickness: 0.45,
+            attenuation_color: c(0.48, 0.26, 0.95),
+            attenuation_distance: 0.32,
             ..default()
         },
     );
-    add("wisp_glow", glow_material(Species::Wisp));
-    add("wisp_flesh", lit(Color::srgb(0.20, 0.13, 0.34), 0.7, 0.0));
-    // Shieldbearer.
-    add(
-        "shield_barrel",
-        lit(Color::srgb(0.22, 0.32, 0.35), 0.5, 0.55),
+    b.glow("wisp_glow", Species::Wisp);
+    b.skin("wisp_bone", Kind::Bone, c(0.55, 0.42, 0.85), 0.55, 0.4);
+    b.skin_with(
+        "wisp_flesh",
+        Kind::Flesh,
+        c(0.50, 0.34, 0.86),
+        0.5,
+        0.3,
+        |m| m.diffuse_transmission = 0.5,
     );
-    add("shield_glow", glow_material(Species::Shieldbearer));
-    add(
-        "shield_iron",
-        lit(Color::srgb(0.16, 0.22, 0.25), 0.45, 0.65),
+    // Shieldbearer: worn plate, dark iron, bronze trim, leather and cloth.
+    b.skin("shield_barrel", Kind::Steel, c(0.62, 0.78, 0.82), 1.0, 0.0);
+    b.glow("shield_glow", Species::Shieldbearer);
+    b.skin("shield_iron", Kind::Iron, c(0.70, 0.76, 0.80), 1.0, 0.0);
+    b.skin("shield_face", Kind::Steel, c(0.95, 1.0, 1.0), 1.8, 0.0);
+    b.skin("shield_bronze", Kind::Bronze, c(1.0, 0.88, 0.70), 1.0, 0.0);
+    b.skin(
+        "shield_leather",
+        Kind::Leather,
+        c(0.95, 0.72, 0.55),
+        0.9,
+        0.0,
     );
-    add(
-        "shield_face",
-        lit(Color::srgb(0.58, 0.68, 0.72), 0.35, 0.65),
+    b.skin_with(
+        "shield_cloth",
+        Kind::Cloth,
+        c(0.85, 0.16, 0.12),
+        0.95,
+        0.0,
+        |m| {
+            m.cull_mode = None;
+            m.double_sided = true;
+        },
     );
-    // Spitter.
-    add("spitter_pod", lit(Color::srgb(0.26, 0.44, 0.17), 0.7, 0.0));
-    add("spitter_glow", glow_material(Species::Spitter));
-    add(
-        "spitter_stalk",
-        lit(Color::srgb(0.34, 0.52, 0.22), 0.65, 0.0),
+    // Spitter: wet, glistening flesh that light passes a little way into.
+    b.skin_with(
+        "spitter_pod",
+        Kind::Flesh,
+        c(0.42, 0.72, 0.30),
+        0.55,
+        0.75,
+        |m| m.diffuse_transmission = 0.3,
     );
-    add("spitter_leg", lit(Color::srgb(0.18, 0.30, 0.13), 0.8, 0.0));
+    b.glow("spitter_glow", Species::Spitter);
+    b.skin("spitter_stalk", Kind::Flesh, c(0.70, 0.92, 0.52), 0.6, 0.6);
+    b.skin("spitter_leg", Kind::Chitin, c(0.55, 0.75, 0.42), 0.9, 0.2);
+    b.skin("spitter_tooth", Kind::Bone, c(0.95, 0.92, 0.75), 0.9, 0.1);
     // Death shards: the creature's own material, still glowing a little.
     let shard = |c: Color, e: LinearRgba| StandardMaterial {
         emissive: e,
         ..lit(c, 0.7, 0.0)
     };
-    add(
+    b.add(
         "shard_husk",
-        shard(
-            Color::srgb(0.22, 0.14, 0.11),
-            LinearRgba::rgb(0.9, 0.3, 0.06),
-        ),
+        shard(c(0.22, 0.14, 0.11), LinearRgba::rgb(0.9, 0.3, 0.06)),
     );
-    add(
+    b.add(
         "shard_wisp",
-        shard(
-            Color::srgb(0.55, 0.42, 0.95),
-            LinearRgba::rgb(0.6, 0.35, 1.4),
-        ),
+        shard(c(0.55, 0.42, 0.95), LinearRgba::rgb(0.6, 0.35, 1.4)),
     );
-    add(
+    b.add(
         "shard_shield",
-        shard(
-            Color::srgb(0.30, 0.42, 0.46),
-            LinearRgba::rgb(0.02, 0.06, 0.07),
-        ),
+        shard(c(0.30, 0.42, 0.46), LinearRgba::rgb(0.02, 0.06, 0.07)),
     );
-    add(
+    b.add(
         "shard_spitter",
-        shard(
-            Color::srgb(0.30, 0.50, 0.20),
-            LinearRgba::rgb(0.2, 0.7, 0.1),
-        ),
+        shard(c(0.30, 0.50, 0.20), LinearRgba::rgb(0.2, 0.7, 0.1)),
     );
-    // Dummy: warm ochre, distinct from every enemy.
-    add(
-        "dummy_burlap",
-        lit(Color::srgb(0.74, 0.56, 0.32), 0.95, 0.0),
+    // Dummy: warm ochre burlap and timber, distinct from every enemy.
+    b.skin("dummy_burlap", Kind::Burlap, c(1.0, 0.86, 0.66), 1.0, 0.0);
+    b.skin("dummy_wood", Kind::Wood, c(0.85, 0.70, 0.55), 0.95, 0.0);
+    b.skin(
+        "dummy_straw",
+        Kind::Burlap,
+        Color::linear_rgb(1.6, 1.25, 0.55),
+        1.0,
+        0.0,
     );
-    add("dummy_wood", lit(Color::srgb(0.36, 0.24, 0.13), 0.95, 0.0));
-    add("dummy_straw", lit(Color::srgb(0.88, 0.74, 0.36), 0.9, 0.0));
-    add("dummy_red", lit(Color::srgb(0.72, 0.16, 0.12), 0.8, 0.0));
-    add("dummy_cream", lit(Color::srgb(0.93, 0.87, 0.72), 0.85, 0.0));
-    add("dummy_dark", lit(Color::srgb(0.10, 0.07, 0.05), 0.9, 0.0));
-    super::bosses::boss_materials(&mut MatBuilder { mats, map: &mut m });
+    b.skin("dummy_red", Kind::Burlap, c(1.0, 0.16, 0.10), 0.9, 0.0);
+    b.skin(
+        "dummy_cream",
+        Kind::Burlap,
+        Color::linear_rgb(1.5, 1.4, 1.15),
+        0.9,
+        0.0,
+    );
+    b.skin("dummy_rope", Kind::Burlap, c(0.62, 0.46, 0.28), 1.0, 0.0);
+    b.lit("dummy_dark", c(0.10, 0.07, 0.05), 0.9, 0.0);
+    super::bosses::boss_materials(&mut b);
     EnemyAssets {
         meshes: mesh_map,
         mats: m,
@@ -715,6 +334,8 @@ pub struct CreatureRig {
     /// Per-instance materials: the body (washed by the tell) and the glow.
     pub body: Handle<StandardMaterial>,
     pub glow: Handle<StandardMaterial>,
+    /// What the body's emissive wash is multiplied by (see [`body_emissive_scale`]).
+    pub emissive_scale: f32,
 }
 
 /// Per-creature animation state.
@@ -818,6 +439,7 @@ pub fn spawn_creature(
         joints,
         body,
         glow,
+        emissive_scale: body_emissive_scale(species),
     }
 }
 
@@ -843,6 +465,13 @@ fn build_husk(
         body,
         a.m("husk_shell"),
         body_m.clone(),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        body,
+        a.m("husk_belly"),
+        a.mat("husk_flesh"),
         Transform::IDENTITY,
     );
     part(
@@ -874,6 +503,13 @@ fn build_husk(
         head,
         a.m("husk_jaw"),
         a.mat("husk_flesh"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        head,
+        a.m("husk_sockets"),
+        a.mat("husk_dark"),
         Transform::IDENTITY,
     );
     part(
@@ -945,7 +581,14 @@ fn build_wisp(
         c,
         orb,
         a.m("wisp_crown"),
-        a.mat("wisp_flesh"),
+        a.mat("wisp_bone"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        orb,
+        a.m("wisp_veins"),
+        glow_m.clone(),
         Transform::IDENTITY,
     );
     let core = joint(c, orb, Transform::IDENTITY);
@@ -1003,6 +646,34 @@ fn build_shield(
         a.mat("shield_iron"),
         Transform::IDENTITY,
     );
+    part(
+        c,
+        body,
+        a.m("shield_rivets"),
+        a.mat("shield_bronze"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        body,
+        a.m("shield_belt"),
+        a.mat("shield_leather"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        body,
+        a.m("shield_buckle"),
+        a.mat("shield_bronze"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        body,
+        a.m("shield_pauldrons"),
+        a.mat("shield_iron"),
+        Transform::IDENTITY,
+    );
 
     let head = joint(c, body, t(0.05, 0.44, 0.0));
     j[HEAD] = head;
@@ -1016,8 +687,15 @@ fn build_shield(
     part(
         c,
         head,
+        a.m("shield_plume"),
+        a.mat("shield_cloth"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        head,
         a.m("shield_visor"),
-        a.mat("husk_char"),
+        a.mat("husk_dark"),
         Transform::IDENTITY,
     );
     part(
@@ -1036,6 +714,13 @@ fn build_shield(
         sh,
         a.m("shield_rim"),
         a.mat("shield_iron"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        sh,
+        a.m("shield_sigil"),
+        a.mat("shield_bronze"),
         Transform::IDENTITY,
     );
     part(
@@ -1060,6 +745,13 @@ fn build_shield(
         weak,
         a.m("shield_vent"),
         glow_m.clone(),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        weak,
+        a.m("shield_grille"),
+        a.mat("husk_dark"),
         Transform::IDENTITY,
     );
 
@@ -1130,6 +822,13 @@ fn build_spitter(
     part(
         c,
         maw,
+        a.m("spitter_teeth"),
+        a.mat("spitter_tooth"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        maw,
         a.m("spitter_mouth"),
         glow_m.clone(),
         Transform::IDENTITY,
@@ -1194,6 +893,13 @@ fn build_dummy(
     part(
         c,
         post,
+        a.m("dummy_rope"),
+        a.mat("dummy_rope"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        post,
         a.m("dummy_target_cream"),
         a.mat("dummy_cream"),
         Transform::IDENTITY,
@@ -1213,6 +919,13 @@ fn build_dummy(
         arms,
         a.m("dummy_bar"),
         a.mat("dummy_wood"),
+        Transform::IDENTITY,
+    );
+    part(
+        c,
+        arms,
+        a.m("dummy_lash"),
+        a.mat("dummy_rope"),
         Transform::IDENTITY,
     );
     part(
@@ -1510,10 +1223,11 @@ pub fn apply_creature(
         glow[1] + flash * 2.5,
         glow[2] + flash * 2.5,
     ];
+    let k = rig.emissive_scale;
     let body_e = [
-        glow[0] * BODY_WASH + flash * 0.8,
-        glow[1] * BODY_WASH + flash * 0.8,
-        glow[2] * BODY_WASH + flash * 0.8,
+        (glow[0] * BODY_WASH + flash * 0.8) * k,
+        (glow[1] * BODY_WASH + flash * 0.8) * k,
+        (glow[2] * BODY_WASH + flash * 0.8) * k,
     ];
     let differs = |a: [f32; 3], b: [f32; 3]| a.iter().zip(b).any(|(x, y)| (x - y).abs() > 0.01);
     if differs(anim.last_glow, glow_e) {

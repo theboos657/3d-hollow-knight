@@ -301,7 +301,7 @@ fn frame_camera(
                 let dist = match (boss, cols.0.is_some()) {
                     (false, true) => 8.5,
                     (false, false) => 12.5,
-                    (true, true) => 22.0,
+                    (true, true) => 13.0,
                     (true, false) => 40.0,
                 };
                 Transform::from_xyz(0.0, 0.6, dist).looking_at(Vec3::new(0.0, 0.6, 0.0), Vec3::Y)
@@ -561,13 +561,14 @@ fn build_enemy_stage(
     mut commands: Commands,
     set: Res<ViewerSet>,
     cols: Res<ViewerColumns>,
+    pbr: Res<crate::look::pbr::Materials>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
 ) {
     if !set.is_enemies() {
         return;
     }
-    let assets = make_assets(&mut meshes, &mut mats);
+    let assets = make_assets(&mut meshes, &mut mats, &pbr);
     let floor = mats.add(StandardMaterial {
         base_color: Color::srgb(0.25, 0.27, 0.34),
         perceptual_roughness: 0.9,

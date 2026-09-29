@@ -2,5 +2,6 @@
 
 pub mod bosses;
 pub mod enemies;
+pub mod geo;
 pub mod knight;
 pub mod projectiles;

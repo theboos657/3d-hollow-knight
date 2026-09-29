@@ -12,7 +12,7 @@
 //! glow, and every telegraph, attack and recovery has its own silhouette
 //! (`rig::creature::{matron,warden}_pose`).
 
-use std::f32::consts::PI;
+use std::f32::consts::{PI, TAU as TAU_F};
 
 use bevy::prelude::*;
 use hk_sim::boss::{Boss, BossBrain, BossState};
@@ -25,6 +25,7 @@ use hk_sim::{ms_to_ticks, SimTick};
 use super::enemies::{
     apply_creature, CreatureAnim, CreatureRig, EnemyAssets, MatBuilder, MeshList,
 };
+use super::geo::thorn;
 use crate::interp::Interpolated;
 use crate::look::kits::bell;
 use crate::rig::creature::{
@@ -83,10 +84,11 @@ const MATRON_BODY: [(f32, f32); 7] = [
 ];
 
 pub fn matron_meshes(out: &mut MeshList) {
-    // Torso: a big mossy hump, mottled.
-    let body = lathe(&MATRON_BODY, 26)
+    // Torso: a big mossy hump, lumped like a hillock.
+    let body = lathe(&MATRON_BODY, 56)
         .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.85)))
-        .jitter(21, 0.04)
+        .sculpted(21, 0.075, 2.4, 4)
+        .uv_scaled(4.0, 2.0)
         .recolor(|p| {
             let n = hash3(
                 5,
@@ -95,12 +97,34 @@ pub fn matron_meshes(out: &mut MeshList) {
                 (p.z * 3.0) as i32,
             );
             let k = ((p.y + 0.75) / 1.8).clamp(0.0, 1.0);
-            let v = 0.62 + 0.38 * n;
-            [v * (0.70 + 0.30 * k), v, v * 0.78, 1.0]
+            let v = 0.80 + 0.20 * n;
+            [v * (0.70 + 0.30 * k), v, v * 0.85, 1.0]
         });
     out.push(("matron_body", body));
 
-    // Shelf fungus down the back and over the shoulders.
+    // Moss and grass tufts sprouting over the back and shoulders.
+    let mut tufts = MeshData::default();
+    for k in 0..70 {
+        let h = |s: i32| hash3(61, k, s, 1);
+        // A point on the upper, rear half of the hump.
+        let y = -0.35 + 1.30 * h(0);
+        let r = profile_r(&MATRON_BODY, y);
+        let a = PI * (0.55 + 0.9 * h(1)) + if h(2) > 0.7 { 1.5 } else { 0.0 };
+        let base = Vec3::new(r * a.cos(), y, r * 0.85 * a.sin());
+        let out_dir = Vec3::new(a.cos(), 0.6, 0.85 * a.sin()).normalize();
+        tufts.merge(&thorn(
+            base * 0.985,
+            out_dir,
+            Vec3::new(-0.3, -0.5, 0.0) * (0.3 + h(3)),
+            0.16 + 0.20 * h(4),
+            0.026,
+            0.0,
+            5,
+        ));
+    }
+    out.push(("matron_tufts", tufts));
+
+    // Shelf fungus down the back and over the shoulders, ridged like growth rings.
     let mut shelves = MeshData::default();
     for (x, y, z, r, tilt) in [
         (-0.78f32, 0.55f32, 0.35f32, 0.36f32, 0.35f32),
@@ -110,15 +134,26 @@ pub fn matron_meshes(out: &mut MeshList) {
         (-0.30, 0.98, 0.32, 0.28, 0.1),
         (-0.42, 0.92, -0.34, 0.30, 0.12),
         (0.20, 0.96, -0.10, 0.26, 0.05),
+        (-1.02, 0.36, -0.05, 0.26, 0.5),
+        (-0.70, -0.32, -0.28, 0.24, 0.3),
     ] {
+        let at_shelf = at(x, y, z) * Mat4::from_rotation_z(tilt);
         shelves.merge(
-            &ellipsoid(r, 0.07, r * 0.9, 6, 12)
-                .transformed(at(x, y, z) * Mat4::from_rotation_z(tilt)),
+            &ellipsoid(r, 0.07, r * 0.9, 10, 20)
+                .sculpted(37, 0.02, 6.0, 2)
+                .transformed(at_shelf),
         );
+        for k in 1..4 {
+            let f = k as f32 / 4.0;
+            shelves.merge(
+                &ring(r * f, 0.011, 20, 5)
+                    .transformed(at_shelf * at(0.0, 0.06 * (1.0 - f * f).sqrt() + 0.004, 0.0)),
+            );
+        }
     }
-    out.push(("matron_shelves", shelves));
+    out.push(("matron_shelves", shelves.uv_scaled(2.0, 2.0)));
 
-    // Acid-green pustules along both flanks.
+    // Acid-green pustules along both flanks, of many sizes.
     let mut spots = MeshData::default();
     for (x, y, z) in [
         (-0.1f32, 0.55f32, 0.78f32),
@@ -126,79 +161,163 @@ pub fn matron_meshes(out: &mut MeshList) {
         (-0.4, -0.15, 0.85),
         (0.05, -0.4, 0.78),
         (0.55, 0.5, 0.62),
+        (0.2, 0.75, 0.55),
+        (-0.55, 0.3, 0.88),
+        (0.62, -0.05, 0.78),
     ] {
         for side in [1.0f32, -1.0] {
-            spots.merge(&ellipsoid(0.07, 0.07, 0.05, 5, 8).transformed(at(x, y, z * side)));
+            let sz = 0.05 + 0.04 * hash3(71, (x * 10.0) as i32, (y * 10.0) as i32, side as i32);
+            spots.merge(&ellipsoid(sz, sz, sz * 0.75, 8, 12).transformed(at(x, y, z * side)));
         }
     }
     out.push(("matron_spots", spots));
 
-    // Head: a low, heavy skull with a jaw, tusks and fungal antlers.
-    let mut head = ellipsoid(0.42, 0.32, 0.40, 10, 14).transformed(at(0.12, 0.0, 0.0));
-    head.merge(&ellipsoid(0.36, 0.13, 0.34, 8, 12).transformed(at(0.20, -0.28, 0.0)));
+    // Head: a low, heavy skull with a jaw, curved tusks and branching antlers.
+    let mut head = ellipsoid(0.42, 0.32, 0.40, 16, 26)
+        .sculpted(41, 0.02, 4.0, 3)
+        .transformed(at(0.12, 0.0, 0.0));
+    head.merge(
+        &ellipsoid(0.36, 0.13, 0.34, 10, 18)
+            .sculpted(43, 0.015, 5.0, 2)
+            .transformed(at(0.20, -0.28, 0.0)),
+    );
+    head.merge(&tube(
+        &[
+            Vec3::new(0.40, 0.14, -0.30),
+            Vec3::new(0.50, 0.19, 0.0),
+            Vec3::new(0.40, 0.14, 0.30),
+        ],
+        |t| 0.06 * (1.0 - 0.4 * (2.0 * t - 1.0).abs()),
+        8,
+    ));
     for side in [-1.0f32, 1.0] {
-        head.merge(
-            &cone(0.06, 0.34, 6)
-                .transformed(at(0.46, -0.26, 0.20 * side) * Mat4::from_rotation_z(-0.25)),
-        );
+        head.merge(&thorn(
+            Vec3::new(0.46, -0.22, 0.20 * side),
+            Vec3::new(0.65, -0.55, 0.05 * side),
+            Vec3::new(0.10, 0.85, 0.0),
+            0.48,
+            0.075,
+            0.05,
+            9,
+        ));
+        let root = Vec3::new(0.0, 0.26, 0.20 * side);
         head.merge(&tube(
             &[
-                Vec3::new(0.0, 0.26, 0.20 * side),
+                root,
                 Vec3::new(-0.10, 0.52, 0.28 * side),
                 Vec3::new(-0.05, 0.78, 0.24 * side),
                 Vec3::new(0.10, 0.92, 0.20 * side),
             ],
-            |t| 0.05 * (1.0 - 0.7 * t),
-            6,
+            |t| 0.055 * (1.0 - 0.7 * t),
+            8,
         ));
+        // Two branches off each antler.
+        for (from, dir) in [
+            (
+                Vec3::new(-0.10, 0.52, 0.28 * side),
+                Vec3::new(-0.6, 0.6, 0.5 * side),
+            ),
+            (
+                Vec3::new(-0.05, 0.78, 0.24 * side),
+                Vec3::new(0.5, 0.7, 0.4 * side),
+            ),
+        ] {
+            head.merge(&thorn(
+                from,
+                dir,
+                Vec3::new(0.0, 0.4, 0.0),
+                0.26,
+                0.030,
+                0.0,
+                6,
+            ));
+        }
     }
-    out.push(("matron_head", head));
+    out.push(("matron_head", head.uv_scaled(2.0, 1.0)));
     let mut eyes = MeshData::default();
     for side in [1.0f32, -1.0] {
-        for (y, z) in [(0.14f32, 0.16f32), (0.02, 0.22), (0.20, 0.06)] {
-            eyes.merge(&ellipsoid(0.045, 0.05, 0.045, 5, 8).transformed(at(0.50, y, z * side)));
+        for (y, z, sz) in [
+            (0.14f32, 0.16f32, 0.05f32),
+            (0.02, 0.22, 0.04),
+            (0.20, 0.06, 0.035),
+        ] {
+            eyes.merge(&ellipsoid(sz * 0.6, sz * 1.1, sz, 6, 10).transformed(at(
+                0.50,
+                y,
+                z * side,
+            )));
         }
     }
     out.push(("matron_eyes", eyes));
 
-    // Arms: long, thick, ending in knuckled fists.
-    let arm = tube(
+    // Arms: long and thick with a swell of muscle, ending in knuckled fists.
+    let mut arm = tube(
         &[
             Vec3::ZERO,
+            Vec3::new(0.10, -0.32, 0.0),
             Vec3::new(0.22, -0.65, 0.0),
+            Vec3::new(0.36, -0.98, 0.0),
             Vec3::new(0.48, -1.25, 0.0),
         ],
-        |t| 0.30 - 0.08 * t,
-        9,
-    );
-    out.push(("matron_arm", arm));
-    let mut fist = ellipsoid(0.36, 0.32, 0.34, 8, 12).transformed(at(0.52, -1.42, 0.0));
-    for dz in [-0.16f32, 0.0, 0.16] {
-        fist.merge(
-            &cone(0.07, 0.2, 5)
-                .transformed(at(0.78, -1.40, dz) * Mat4::from_rotation_z(-FRAC_PI_2_F)),
-        );
+        |t| 0.30 - 0.08 * t + 0.05 * (t * PI).sin(),
+        14,
+    )
+    .sculpted(45, 0.03, 4.0, 3);
+    arm.merge(&thorn(
+        Vec3::new(0.22, -0.65, 0.0),
+        Vec3::new(-0.8, 0.4, 0.0),
+        Vec3::new(-0.1, 0.5, 0.0),
+        0.30,
+        0.07,
+        0.0,
+        7,
+    ));
+    out.push(("matron_arm", arm.uv_scaled(2.0, 3.0)));
+    let mut fist = ellipsoid(0.36, 0.32, 0.34, 12, 20)
+        .sculpted(47, 0.03, 5.0, 2)
+        .transformed(at(0.52, -1.42, 0.0));
+    for dz in [-0.19f32, -0.065, 0.065, 0.19] {
+        fist.merge(&ellipsoid(0.085, 0.085, 0.085, 6, 10).transformed(at(0.80, -1.36, dz)));
+        fist.merge(&thorn(
+            Vec3::new(0.84, -1.36, dz),
+            Vec3::new(1.0, -0.15, dz),
+            Vec3::new(0.0, -0.5, 0.0),
+            0.20,
+            0.05,
+            0.0,
+            6,
+        ));
     }
     out.push(("matron_fist", fist));
 
+    let mut leg = limb(Vec3::ZERO, Vec3::new(0.05, -0.62, 0.0), 0.32, 0.26, 12);
+    leg.merge(&ellipsoid(0.30, 0.16, 0.30, 8, 12).transformed(at(0.02, -0.02, 0.0)));
     out.push((
         "matron_leg",
-        limb(Vec3::ZERO, Vec3::new(0.05, -0.62, 0.0), 0.32, 0.26, 8),
+        leg.sculpted(49, 0.025, 4.0, 3).uv_scaled(2.0, 2.0),
     ));
-    out.push((
-        "matron_foot",
-        ellipsoid(0.44, 0.14, 0.32, 6, 10).transformed(at(0.16, -0.66, 0.0)),
-    ));
+    let mut foot = ellipsoid(0.44, 0.14, 0.32, 8, 14).transformed(at(0.16, -0.66, 0.0));
+    for dz in [-0.16f32, 0.0, 0.16] {
+        foot.merge(&thorn(
+            Vec3::new(0.52, -0.66, dz),
+            Vec3::new(1.0, -0.1, dz),
+            Vec3::new(0.0, -0.4, 0.0),
+            0.18,
+            0.05,
+            0.0,
+            6,
+        ));
+    }
+    out.push(("matron_foot", foot.sculpted(51, 0.02, 5.0, 2)));
 
-    // A spore jar hanging at the belt.
+    // A spore jar hanging at the belt, with a stopper and a rope collar.
     out.push((
         "matron_jar",
-        ellipsoid(0.16, 0.22, 0.16, 8, 10).transformed(at(0.0, -0.22, 0.0)),
+        ellipsoid(0.16, 0.22, 0.16, 12, 18).transformed(at(0.0, -0.22, 0.0)),
     ));
-    out.push((
-        "matron_jar_cap",
-        cone(0.10, 0.12, 8).transformed(at(0.0, -0.02, 0.0)),
-    ));
+    let mut cap = cone(0.10, 0.12, 10).transformed(at(0.0, -0.02, 0.0));
+    cap.merge(&ring(0.085, 0.018, 14, 5).transformed(at(0.0, -0.03, 0.0)));
+    out.push(("matron_jar_cap", cap));
 }
 
 const FRAC_PI_2_F: f32 = std::f32::consts::FRAC_PI_2;
@@ -217,10 +336,18 @@ const WARDEN_BELL: [(f32, f32); 9] = [
 
 pub fn warden_meshes(out: &mut MeshList) {
     let squash = Mat4::from_scale(Vec3::new(1.0, 1.0, 0.9));
-    // The bell: cast bronze, polished at the lip, green at the crown.
-    let bell_body = lathe(&WARDEN_BELL, 30)
+    // The bell: cast bronze, its profile resampled smooth, with the small
+    // irregularities of a casting and a polished lip.
+    let profile: Vec<(f32, f32)> = (0..=48)
+        .map(|k| {
+            let y = -1.30 + 2.36 * k as f32 / 48.0;
+            (profile_r(&WARDEN_BELL, y), y)
+        })
+        .collect();
+    let bell_body = lathe(&profile, 72)
         .transformed(squash)
-        .jitter(31, 0.02)
+        .sculpted(31, 0.022, 2.6, 3)
+        .uv_scaled(4.0, 2.0)
         .recolor(|p| {
             let k = ((p.y + 1.3) / 2.4).clamp(0.0, 1.0);
             let n = hash3(
@@ -229,34 +356,46 @@ pub fn warden_meshes(out: &mut MeshList) {
                 (p.y * 4.0) as i32,
                 (p.z * 4.0) as i32,
             );
-            let v = 0.72 + 0.28 * n;
+            let v = 0.88 + 0.12 * n;
             [
-                v * (1.0 - 0.35 * k),
+                v * (1.0 - 0.25 * k),
                 v * (0.95 + 0.05 * k),
-                v * (0.85 + 0.15 * k),
+                v * (0.9 + 0.1 * k),
                 1.0,
             ]
         });
     out.push(("warden_bell", bell_body));
-    // Raised bands around the bell, and a crown ring on top.
+    // Raised bands around the bell, studded with rivets, and a crown ring on top.
     let mut bands = MeshData::default();
+    let mut studs = MeshData::default();
     for (y, w) in [(-1.16f32, 0.06f32), (-0.05, 0.05), (0.6, 0.045)] {
+        let r = profile_r(&WARDEN_BELL, y);
         bands.merge(
-            &ring(profile_r(&WARDEN_BELL, y) + 0.01, w, 30, 6)
+            &ring(r + 0.01, w, 72, 8)
                 .transformed(squash)
                 .transformed(at(0.0, y, 0.0)),
         );
+        let n = (r * 26.0) as i32;
+        for i in 0..n {
+            let a = TAU_F * i as f32 / n as f32;
+            studs.merge(&ellipsoid(0.04, 0.04, 0.04, 5, 8).transformed(at(
+                (r + 0.045) * a.cos(),
+                y,
+                (r + 0.045) * 0.9 * a.sin(),
+            )));
+        }
     }
-    bands.merge(&ring(0.28, 0.07, 14, 6).transformed(at(0.0, 1.08, 0.0)));
-    out.push(("warden_bands", bands));
+    bands.merge(&ring(0.28, 0.07, 24, 8).transformed(at(0.0, 1.08, 0.0)));
+    out.push(("warden_bands", bands.uv_scaled(6.0, 1.0)));
+    out.push(("warden_studs", studs));
     // The rune band: a glowing ring with notches.
-    let mut runes = ring(profile_r(&WARDEN_BELL, -0.55) + 0.02, 0.045, 30, 6)
+    let mut runes = ring(profile_r(&WARDEN_BELL, -0.55) + 0.02, 0.045, 60, 6)
         .transformed(squash)
         .transformed(at(0.0, -0.55, 0.0));
     for k in 0..12 {
         let a = k as f32 / 12.0 * 2.0 * PI;
         let r = profile_r(&WARDEN_BELL, -0.55);
-        runes.merge(&ellipsoid(0.06, 0.16, 0.05, 5, 8).transformed(
+        runes.merge(&ellipsoid(0.06, 0.16, 0.05, 6, 10).transformed(
             at(r * a.cos() * 1.03, -0.55, r * 0.9 * a.sin() * 1.03) * Mat4::from_rotation_y(-a),
         ));
     }
@@ -295,77 +434,108 @@ pub fn warden_meshes(out: &mut MeshList) {
     }
     out.push(("warden_cracks", cracks));
 
-    // The floating mask: hood, bone mask, horns.
-    let hood = lathe(&[(0.46, -0.40), (0.44, 0.0), (0.32, 0.45), (0.0, 0.80)], 16)
+    // The floating mask: a folded hood, a bone mask with a brow and cheekbones,
+    // hollow eyes and ribbed horns.
+    let hood = lathe(&[(0.46, -0.40), (0.44, 0.0), (0.32, 0.45), (0.0, 0.80)], 32)
         .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.85)))
-        .transformed(at(-0.20, 0.0, 0.0));
+        .sculpted(53, 0.035, 3.5, 3)
+        .transformed(at(-0.20, 0.0, 0.0))
+        .uv_scaled(4.0, 2.0);
     out.push(("warden_hood", hood));
-    let mut face = ellipsoid(0.34, 0.46, 0.27, 10, 14).transformed(at(0.30, 0.0, 0.0));
+    let mut face = ellipsoid(0.34, 0.46, 0.27, 16, 26)
+        .sculpted(55, 0.012, 6.0, 2)
+        .transformed(at(0.30, 0.0, 0.0));
+    face.merge(&tube(
+        &[
+            Vec3::new(0.52, 0.20, -0.20),
+            Vec3::new(0.62, 0.23, 0.0),
+            Vec3::new(0.52, 0.20, 0.20),
+        ],
+        |t| 0.035 * (1.0 - 0.4 * (2.0 * t - 1.0).abs()),
+        7,
+    ));
+    face.merge(&ellipsoid(0.06, 0.20, 0.05, 6, 10).transformed(at(0.62, -0.04, 0.0)));
     for side in [-1.0f32, 1.0] {
-        face.merge(&tube(
-            &[
-                Vec3::new(0.10, 0.34, 0.14 * side),
-                Vec3::new(0.04, 0.62, 0.22 * side),
-                Vec3::new(-0.14, 0.80, 0.24 * side),
-                Vec3::new(-0.34, 0.84, 0.22 * side),
-            ],
-            |t| 0.05 * (1.0 - 0.8 * t),
-            6,
+        face.merge(&ellipsoid(0.07, 0.05, 0.07, 6, 10).transformed(at(0.56, -0.10, 0.19 * side)));
+        face.merge(&thorn(
+            Vec3::new(0.10, 0.34, 0.14 * side),
+            Vec3::new(-0.15, 1.0, 0.35 * side),
+            Vec3::new(-0.9, -0.2, 0.0),
+            0.98,
+            0.055,
+            0.10,
+            9,
         ));
     }
-    out.push(("warden_face", face));
-    let mut eyes = ellipsoid(0.05, 0.04, 0.07, 5, 8).transformed(at(0.60, 0.10, 0.12));
-    eyes.merge(&ellipsoid(0.05, 0.04, 0.07, 5, 8).transformed(at(0.60, 0.10, -0.12)));
+    out.push(("warden_face", face.uv_scaled(2.0, 1.0)));
+    let mut sockets = ellipsoid(0.05, 0.06, 0.085, 6, 10).transformed(at(0.575, 0.10, 0.12));
+    sockets.merge(&ellipsoid(0.05, 0.06, 0.085, 6, 10).transformed(at(0.575, 0.10, -0.12)));
+    out.push(("warden_sockets", sockets));
+    let mut eyes = ellipsoid(0.03, 0.03, 0.06, 6, 10).transformed(at(0.61, 0.10, 0.12));
+    eyes.merge(&ellipsoid(0.03, 0.03, 0.06, 6, 10).transformed(at(0.61, 0.10, -0.12)));
     out.push(("warden_eyes", eyes));
 
-    // Chain arms ending in bell-fists.
-    let mut chain_arm = tube(
-        &[
-            Vec3::ZERO,
-            Vec3::new(0.12, -0.45, 0.0),
-            Vec3::new(0.28, -0.9, 0.0),
-        ],
-        |_| 0.05,
-        6,
-    );
-    for k in 0..4 {
-        let y = -0.12 - 0.22 * k as f32;
+    // Chain arms: real linked chain, ending in bell-fists.
+    let mut chain_arm = MeshData::default();
+    let (a0, a1) = (Vec3::ZERO, Vec3::new(0.28, -0.9, 0.0));
+    let links = 7;
+    for k in 0..links {
+        let f = (k as f32 + 0.5) / links as f32;
+        let p = a0.lerp(a1, f);
+        let dir = a1 - a0;
+        // Alternate links turn a quarter so they interlock.
+        let turn = if k % 2 == 0 { 0.0 } else { FRAC_PI_2_F };
         chain_arm.merge(
-            &ring(0.09, 0.028, 10, 4)
+            &ring(0.075, 0.026, 12, 6)
                 .transformed(Mat4::from_rotation_z(FRAC_PI_2_F))
-                .transformed(Mat4::from_rotation_y(if k % 2 == 0 {
-                    0.0
-                } else {
-                    FRAC_PI_2_F
-                }))
-                .transformed(at(0.28 * (-y) / 0.9 * 0.5, y, 0.0)),
+                .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 1.0)))
+                .transformed(Mat4::from_rotation_x(turn))
+                .transformed(Mat4::from_rotation_z(-(dir.x).atan2(-dir.y)) * Mat4::IDENTITY)
+                .transformed(at(p.x, p.y, p.z)),
         );
     }
     out.push(("warden_chain", chain_arm));
     out.push(("warden_fist", bell(0.28, -0.9, 0.44, 0.0)));
 
-    out.push((
-        "warden_leg",
-        limb(Vec3::ZERO, Vec3::new(0.04, -0.32, 0.0), 0.15, 0.11, 7),
-    ));
+    let mut leg = limb(Vec3::ZERO, Vec3::new(0.04, -0.32, 0.0), 0.15, 0.11, 10);
+    leg.merge(&ring(0.14, 0.03, 14, 5).transformed(at(0.0, -0.05, 0.0)));
+    out.push(("warden_leg", leg.sculpted(57, 0.01, 6.0, 2)));
     out.push((
         "warden_foot",
-        ellipsoid(0.26, 0.08, 0.2, 6, 10).transformed(at(0.08, -0.34, 0.0)),
+        ellipsoid(0.26, 0.08, 0.2, 8, 14)
+            .transformed(at(0.08, -0.34, 0.0))
+            .sculpted(59, 0.01, 6.0, 2),
     ));
 }
 
 pub fn boss_materials(m: &mut MatBuilder<'_>) {
+    use crate::look::pbr::Kind;
+    let c = Color::srgb;
     m.glow("matron_glow", Species::Matron);
-    m.lit("matron_body", Color::srgb(0.36, 0.44, 0.26), 0.9, 0.0);
-    m.lit("matron_shelf", Color::srgb(0.66, 0.60, 0.44), 0.8, 0.0);
-    m.lit("matron_flesh", Color::srgb(0.30, 0.34, 0.20), 0.85, 0.0);
-    m.lit("matron_bone", Color::srgb(0.76, 0.72, 0.56), 0.6, 0.0);
+    // The Matron: a hide of dense moss, soft fungus, leathery limbs, old bone.
+    m.skin("matron_body", Kind::Moss, c(0.58, 0.68, 0.48), 1.0, 0.0);
+    m.skin("matron_tuft", Kind::Moss, c(0.75, 0.9, 0.55), 1.0, 0.0);
+    m.skin("matron_shelf", Kind::Flesh, c(1.05, 0.95, 0.70), 0.7, 0.35);
+    m.skin("matron_flesh", Kind::Moss, c(0.46, 0.54, 0.36), 1.0, 0.0);
+    m.skin("matron_bone", Kind::Bone, c(1.0, 0.96, 0.82), 0.9, 0.15);
     m.glow("warden_glow", Species::Bellwarden);
-    m.lit("warden_bell", Color::srgb(0.62, 0.42, 0.18), 0.4, 0.75);
-    m.lit("warden_iron", Color::srgb(0.20, 0.16, 0.12), 0.5, 0.65);
-    m.lit("warden_cloth", Color::srgb(0.10, 0.09, 0.12), 0.9, 0.0);
-    m.lit("warden_mask", Color::srgb(0.82, 0.78, 0.68), 0.5, 0.0);
-    m.lit("warden_fist", Color::srgb(0.70, 0.48, 0.20), 0.35, 0.8);
+    // The Bellwarden: cast bronze and black iron, a cloth hood, a bone mask.
+    m.skin("warden_bell", Kind::Bronze, c(1.0, 0.86, 0.66), 0.8, 0.5);
+    m.skin("warden_iron", Kind::Iron, c(0.75, 0.72, 0.70), 1.0, 0.0);
+    m.skin_with(
+        "warden_cloth",
+        Kind::Cloth,
+        c(0.16, 0.14, 0.22),
+        1.0,
+        0.0,
+        |mat| {
+            mat.cull_mode = None;
+            mat.double_sided = true;
+        },
+    );
+    m.skin("warden_mask", Kind::Bone, c(1.0, 0.97, 0.90), 0.8, 0.3);
+    m.skin("warden_fist", Kind::Bronze, c(1.0, 0.90, 0.70), 0.7, 0.4);
+    m.lit("warden_dark", c(0.02, 0.02, 0.025), 0.8, 0.0);
 }
 
 // --------------------------------------------------------------------- rigs --
@@ -396,6 +566,7 @@ pub fn build_matron(
     let body = joint(c, lean, t(0.0, 1.0, 0.0));
     j[BODY] = body;
     part(c, body, a.m("matron_body"), body_m.clone(), id);
+    part(c, body, a.m("matron_tufts"), a.mat("matron_tuft"), id);
     part(c, body, a.m("matron_shelves"), a.mat("matron_shelf"), id);
     part(c, body, a.m("matron_spots"), glow_m.clone(), id);
 
@@ -437,6 +608,7 @@ pub fn build_warden(
     j[BODY] = body;
     part(c, body, a.m("warden_bell"), body_m.clone(), id);
     part(c, body, a.m("warden_bands"), a.mat("warden_iron"), id);
+    part(c, body, a.m("warden_studs"), a.mat("warden_fist"), id);
     part(c, body, a.m("warden_runes"), glow_m.clone(), id);
     let cracks = joint(c, body, Transform::IDENTITY);
     j[CRACKS] = cracks;
@@ -446,6 +618,7 @@ pub fn build_warden(
     j[MASK] = mask;
     part(c, mask, a.m("warden_hood"), a.mat("warden_cloth"), id);
     part(c, mask, a.m("warden_face"), a.mat("warden_mask"), id);
+    part(c, mask, a.m("warden_sockets"), a.mat("warden_dark"), id);
     part(c, mask, a.m("warden_eyes"), glow_m.clone(), id);
 
     for (idx, z) in [(ARM_FRONT, 0.95), (ARM_BACK, -0.95)] {
