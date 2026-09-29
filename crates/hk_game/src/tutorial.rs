@@ -199,6 +199,9 @@ struct TipPanel;
 struct TipText;
 #[derive(Component)]
 struct DummyMarker;
+/// The key name shown in the marker over the dummy.
+#[derive(Component)]
+struct MarkerKey;
 
 fn spawn_ui(mut commands: Commands) {
     commands
@@ -239,8 +242,9 @@ fn spawn_ui(mut commands: Commands) {
         DummyMarker,
         Node {
             position_type: PositionType::Absolute,
-            width: Val::Px(34.0),
+            min_width: Val::Px(34.0),
             height: Val::Px(34.0),
+            padding: UiRect::horizontal(Val::Px(8.0)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             border_radius: BorderRadius::all(Val::Px(17.0)),
@@ -249,7 +253,8 @@ fn spawn_ui(mut commands: Commands) {
         BackgroundColor(Color::srgba(0.03, 0.03, 0.06, 0.7)),
         Visibility::Hidden,
         children![(
-            Text::new("X"),
+            MarkerKey,
+            Text::new("J"),
             TextFont {
                 font_size: 20.0,
                 ..default()
@@ -409,7 +414,15 @@ fn dummy_marker(
     cam: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     dummies: Query<(&CreatureRig, &GlobalTransform)>,
     mut marker: Query<(&mut Node, &mut Visibility), With<DummyMarker>>,
+    mut key_text: Query<&mut Text, With<MarkerKey>>,
 ) {
+    // The marker names the player's own attack key.
+    if let Ok(mut t) = key_text.single_mut() {
+        let want = settings.main_key(Action::Attack);
+        if t.0 != want {
+            t.0 = want;
+        }
+    }
     let Ok((mut node, mut vis)) = marker.single_mut() else {
         return;
     };
@@ -540,8 +553,9 @@ mod tests {
     #[test]
     fn the_words_use_the_players_own_keys() {
         let mut s = Settings::default();
-        assert!(tip_text(Tip::Attack, &s).contains("[X / J]"));
-        assert!(tip_text(Tip::Move, &s).contains("Space / Z"));
+        assert!(tip_text(Tip::Attack, &s).contains("[J / X]"));
+        assert!(tip_text(Tip::Move, &s).contains("[K / Space]"));
+        assert!(tip_text(Tip::Move, &s).contains("[A / Left]"));
         s.bind(Action::Attack, KeyCode::KeyK);
         assert!(
             tip_text(Tip::Attack, &s).contains('K'),

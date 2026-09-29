@@ -11,7 +11,7 @@ use hk_sim::SimTick;
 
 use crate::audio::{play_sfx, Sounds};
 use crate::save_io::{self, SaveDir};
-use crate::settings::{self, Settings};
+use crate::settings::{self, Layout, Settings};
 use crate::world_view::{begin_game, StartMode};
 
 pub struct MenuPlugin {
@@ -98,6 +98,7 @@ enum Item {
     Shake,
     Vsync,
     Quality,
+    Layout,
     Controls,
     Back,
     Bind(Action),
@@ -142,6 +143,7 @@ fn items(screen: &Screen, has_save: bool) -> Vec<Item> {
             Item::Shake,
             Item::Vsync,
             Item::Quality,
+            Item::Layout,
             Item::Controls,
             Item::Back,
         ],
@@ -171,6 +173,10 @@ fn label(item: &Item, s: &Settings, menu: &Menu) -> String {
         Item::Shake => format!("Screen shake    < {} >", onoff(s.shake)),
         Item::Vsync => format!("VSync           < {} >", onoff(s.vsync)),
         Item::Quality => format!("Graphics        < {} >", s.quality.name()),
+        Item::Layout => format!(
+            "Key layout      < {} >",
+            s.layout().map_or("Custom", |l| l.name())
+        ),
         Item::Controls => "Controls".into(),
         Item::Back => "Back".into(),
         Item::Bind(a) => {
@@ -206,7 +212,14 @@ fn read_nav(keys: &ButtonInput<KeyCode>, pads: &Query<&Gamepad>) -> Nav {
         down: k(&[KeyCode::ArrowDown, KeyCode::KeyS]),
         left: k(&[KeyCode::ArrowLeft, KeyCode::KeyA]),
         right: k(&[KeyCode::ArrowRight, KeyCode::KeyD]),
-        confirm: k(&[KeyCode::Enter, KeyCode::Space, KeyCode::KeyZ, KeyCode::KeyX]),
+        confirm: k(&[
+            KeyCode::Enter,
+            KeyCode::Space,
+            KeyCode::KeyZ,
+            KeyCode::KeyX,
+            KeyCode::KeyJ,
+            KeyCode::KeyK,
+        ]),
         back: k(&[KeyCode::Escape, KeyCode::Backspace]),
         start: k(&[KeyCode::Escape]),
     };
@@ -305,6 +318,11 @@ fn menu_input(
             Item::Vsync => settings.vsync = !settings.vsync,
             // Left goes down a tier, right or confirm goes up.
             Item::Quality => settings.quality = settings.quality.step(step >= 0.0),
+            // WASD <-> Classic; from a custom set, the first press picks WASD.
+            Item::Layout => {
+                let next = settings.layout().map_or(Layout::Wasd, Layout::other);
+                settings.apply_layout(next);
+            }
             _ => {}
         }
         settings.clamp();
@@ -752,6 +770,30 @@ mod tests {
         assert!(!a.world().resource::<Settings>().shake);
         tap(&mut a, KeyCode::ArrowRight);
         assert!(a.world().resource::<Settings>().shake);
+    }
+
+    #[test]
+    fn the_key_layout_switches_between_wasd_and_classic() {
+        let mut a = app(Screen::Options(Back::Pause), tmp_dir("layout"));
+        // Master, Music, Sfx, Shake, Vsync, Graphics, then Key layout.
+        for _ in 0..6 {
+            tap(&mut a, KeyCode::ArrowDown);
+        }
+        assert_eq!(
+            a.world().resource::<Settings>().layout(),
+            Some(Layout::Wasd),
+            "WASD is the default"
+        );
+        tap(&mut a, KeyCode::Enter);
+        let s = a.world().resource::<Settings>().clone();
+        assert_eq!(s.layout(), Some(Layout::Classic));
+        assert_eq!(s.key_codes(hk_sim::input::Action::Jump)[0], KeyCode::Space);
+        tap(&mut a, KeyCode::ArrowRight);
+        assert_eq!(
+            a.world().resource::<Settings>().layout(),
+            Some(Layout::Wasd),
+            "and back again"
+        );
     }
 
     #[test]

@@ -66,3 +66,50 @@ fn sample_devices(
         input.set(*action, down, next);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::Settings;
+
+    fn sampled(held: &[KeyCode], settings: Settings) -> InputState {
+        let mut app = App::new();
+        app.insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(settings)
+            .insert_resource(SimTick(0))
+            .insert_resource(InputState::default())
+            .add_systems(Update, sample_devices);
+        for k in held {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(*k);
+        }
+        app.update();
+        app.world().resource::<InputState>().clone()
+    }
+
+    #[test]
+    fn the_default_wasd_layout_drives_every_action() {
+        for (key, action) in [
+            (KeyCode::KeyA, Action::Left),
+            (KeyCode::KeyD, Action::Right),
+            (KeyCode::KeyW, Action::Up),
+            (KeyCode::KeyS, Action::Down),
+            (KeyCode::ArrowLeft, Action::Left),
+            (KeyCode::ArrowRight, Action::Right),
+            // The right hand: the WASD layout's fighting keys.
+            (KeyCode::KeyJ, Action::Attack),
+            (KeyCode::KeyK, Action::Jump),
+            (KeyCode::KeyL, Action::Dash),
+            (KeyCode::KeyI, Action::Cast),
+            (KeyCode::KeyF, Action::Focus),
+            // And the old keys still work beside them.
+            (KeyCode::Space, Action::Jump),
+            (KeyCode::KeyX, Action::Attack),
+            (KeyCode::ShiftLeft, Action::Dash),
+        ] {
+            let input = sampled(&[key], Settings::default());
+            assert!(input.held(action), "{key:?} should hold {action:?}");
+        }
+    }
+}

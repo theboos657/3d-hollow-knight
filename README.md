@@ -39,18 +39,23 @@ choose **New Game**) to start over.
 
 ## Controls
 
-| Action | Keyboard | Gamepad |
+The default is a **WASD layout**: the left hand moves and aims, the right hand fights.
+The keys from the classic layout (arrows, Space, X, Shift) work as second keys, so
+nothing is lost. **Options -> Key layout** switches to the **Classic** layout (arrows
+move, Z jump, X attack, C dash).
+
+| Action | Keyboard (WASD layout) | Gamepad |
 |---|---|---|
-| Move | Arrows / WASD | D-pad / left stick |
-| Jump (hold = higher, tap = hop) | Space / Z | A (south) |
-| Attack | X / J | X (west) |
-| Up / down attack | hold Up / Down + Attack. Down in the air **pogoes** off enemies, spikes and golden bells | same |
-| Dash (after the Matron) | C / Left Shift | RT / B |
+| Move | A / D (or Left / Right) | D-pad / left stick |
+| Jump (hold = higher, tap = hop) | K (or Space) | A (south) |
+| Attack | J (or X) | X (west) |
+| Up / down attack | hold W / S + Attack. Down in the air **pogoes** off enemies, spikes and golden bells | same |
+| Dash (after the Matron) | L (or Left Shift) | RT / B |
 | Wall slide + wall jump (after the shrine) | hold toward the wall, then Jump | same |
-| Focus: hold to heal one mask (costs 33 soul) | F | LT |
-| Ember Bolt (costs 33 soul) | V | Y |
-| Drop through a thin platform | Down + Jump | |
-| Rest at a bench | Up | Up |
+| Focus: hold to heal one mask (costs 33 soul) | F (or U) | LT |
+| Ember Bolt (costs 33 soul) | I (or V) | Y |
+| Drop through a thin platform | S + Jump | |
+| Rest at a bench | W (or Up) | Up |
 | Pause / options | Esc | Start |
 | Debug overlay | F1 | |
 
