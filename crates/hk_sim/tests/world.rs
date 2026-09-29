@@ -394,3 +394,96 @@ fn every_door_leads_where_it_says_and_you_arrive_safely() {
     assert_eq!(checked, defs.iter().map(|d| d.exits.len()).sum::<usize>());
     assert!(checked >= 30, "only {checked} doors checked");
 }
+
+// ------------------------------------------------------- early-game pacing --
+// Playtest feedback: the first rooms were "a lot of parkour" with the first
+// fight in the third room. These lock the fix in.
+
+fn fights(room: &RoomDef) -> usize {
+    room.spawns
+        .iter()
+        .filter(|s| {
+            matches!(
+                s.kind,
+                SpawnKind::Husk | SpawnKind::Wisp | SpawnKind::Shieldbearer | SpawnKind::Spitter
+            )
+        })
+        .count()
+}
+
+#[test]
+fn the_first_room_has_a_real_fight() {
+    let lib = library();
+    let a1 = lib.get("A1").unwrap();
+    let start = a1.entry("start").unwrap();
+    let husk = a1
+        .spawns
+        .iter()
+        .find(|s| s.kind == SpawnKind::Husk)
+        .expect("A1 has a Husk");
+    let dx = (husk.at.0 - start.at.0).abs();
+    assert!(
+        (10.5..=20.0).contains(&dx),
+        "the first Husk should be close enough to reach in a few seconds, but not \
+         already on top of you: {dx} tiles from the start"
+    );
+    assert!(
+        a1.spawns.iter().any(|s| s.kind == SpawnKind::Dummy),
+        "and a dummy to learn the nail on"
+    );
+}
+
+#[test]
+fn the_early_rooms_are_not_a_parkour_course() {
+    let lib = library();
+    let (mut spike_tiles, mut creatures) = (0, 0);
+    for id in ["A1", "A2", "A3", "A4"] {
+        let d = lib.get(id).unwrap();
+        let mut longest = 0;
+        for row in &d.tiles {
+            let mut run = 0;
+            let mut oneway = 0;
+            for c in row.chars().chain(std::iter::once('.')) {
+                run = if c == '^' { run + 1 } else { 0 };
+                longest = longest.max(run);
+                spike_tiles += (c == '^') as usize;
+                if c == '=' {
+                    oneway += 1;
+                } else {
+                    assert!(
+                        oneway == 0 || oneway >= 4,
+                        "{id}: a {oneway}-tile platform is a fiddly perch, not a place to stand"
+                    );
+                    oneway = 0;
+                }
+            }
+        }
+        assert!(
+            longest <= 8,
+            "{id}: a {longest}-tile spike bed is a parkour test"
+        );
+        creatures += fights(d);
+    }
+    assert!(
+        spike_tiles <= 12,
+        "{spike_tiles} spike tiles in the first four rooms"
+    );
+    assert!(
+        creatures >= 8,
+        "only {creatures} creatures to fight in the first four rooms"
+    );
+}
+
+#[test]
+fn a_bench_comes_early() {
+    let lib = library();
+    let benches: usize = ["A1", "A2", "A3"]
+        .iter()
+        .map(|i| lib.get(i).unwrap().benches.len())
+        .sum();
+    assert!(benches >= 1, "no bench in the first three rooms");
+    assert!(
+        !lib.get("A2").unwrap().benches.is_empty(),
+        "the first bench is in A2, right after the first fights"
+    );
+}

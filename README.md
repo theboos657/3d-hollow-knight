@@ -77,7 +77,7 @@ The world, in the order it opens up:
 
 | Area | Rooms | What it teaches |
 |---|---|---|
-| Ashen Descent | A1 The Landing, A2 Broken Ledges, A3 First Husk, A4 The Spike Pit | jumping, attacking, your first enemy, platforming over spikes (and pogo) |
+| Ashen Descent | A1 The Landing, A2 Broken Ledges, A3 First Husk, A4 The Spike Pit | mostly fighting: a training dummy and your first Husk in the very first room, walk-down platforms, a bench in A2, your first flier, one spike pit to cross (or pogo over) |
 | Gutterglow Warrens | B1 the hub, B2 Husk Nest, B3 Wisp Shaft, B4 Matron's Den | a hub with four doors; the **Gutter Matron** gives you **Dash** |
 | Cistern of Bells | C1 Flooded Walk, C2 Shield Gallery, C3 Bell Shaft, C4 Grip Shrine | needs Dash; the shrine teaches **Wall Grip** |
 | Lantern Spire | D1 The Ascent, D2 Bell-Keeper's Rest, D3 The Gauntlet, D4 The Hollow Throne | needs Wall Grip (and both later); the **Bellwarden** |

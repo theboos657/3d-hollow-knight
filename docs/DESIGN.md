@@ -147,9 +147,15 @@ A1 --hole--> A2 --> A3 --> A4 --> B1 (hub, bench) --E--> B2 --> B3 --> B4  Matro
 | D1 (The Ascent) | a 60-tile shaft | Wall Grip |
 | D3 (The Gauntlet) | spikes *and* an 8-tall wall | both |
 
-Benches: A3, B1, B3 (top, right before the Matron), C2, C3 (top), D2, D3 (right before the
+Benches: A2, A3, B1, B3 (top, right before the Matron), C2, C3 (top), D2, D3 (right before the
 throne). Dying in a boss fight puts you back at the bench before it, and the arena resets.
 Boss defeats and pickups persist and are saved.
+
+**The opening is combat, not parkour** (from playtest feedback): a training dummy and the first
+Husk are in the very first room, A2 is a walk-down staircase of wide platforms with one small
+spike patch and the first bench, A3 adds a flier, and A4's spike pit is 8 tiles wide with a
+stepping platform. Tests in `tests/world.rs` lock this in (a real fight in A1, at most 12 spike
+tiles and no spike bed over 8 wide in A1-A4, a bench by A3).
 
 **Proof, not just intent.** `lint_rooms` runs the real controller over every room (walk, jumps
 at four heights, edge jumps at the last moment, dashes at five timings, wall climbs of two kinds,
@@ -196,7 +202,7 @@ Play once through without reading anything; write down where you were confused, 
 - [ ] Do the first three jumps in A1/A2 feel right? (height, weight, landing)
 - [ ] Is a tap a hop and a hold a full jump? Any missed or eaten inputs?
 - [ ] Does the nail feel fast and crunchy? Is the hitstop pleasant or sticky?
-- [ ] Pogo: can you chain it reliably over the spikes in A4?
+- [ ] Pogo: can you use it to cross the spike pit in A4 (or the patch in A2)?
 - [ ] Dash and wall jump: readable, controllable, satisfying?
 - [ ] Camera: does it ever lag, bob, or hide the thing that's about to hit you?
 

@@ -149,19 +149,19 @@ def new(*a, **k):
 
 
 # =========================================================== A: Ashen Descent ==
-# The tutorial. Nothing here needs an ability; it teaches jumping, attacking,
-# fighting a Husk, and hopping platforms over spikes.
+# The tutorial. Nothing here needs an ability. It is mostly FIGHTING: a training
+# dummy and the first Husk in the very first room, then platforms you can
+# simply walk and hop down, a bench, and only small spike hazards.
 
 
 def build_A1():
     r = new("A1", "The Landing", "Ashen", 44, 16)
     r.entry("start", 4, 2, 1)
     r.entry("hatch", 36, 2, -1)
-    r.block(15, 2, 3)  # a one-tile step
-    r.block(23, 3, 4)  # a two-tile block
-    r.plat(27, 6, 6)  # a thin platform to jump up through
-    r.air(31, 1, 4, 1)  # a shallow pit: fall in, climb out
-    r.spawn("Dummy", 11, 2)  # something to hit
+    r.spawn("Dummy", 7, 2)  # three tiles from the start: learn to strike
+    r.spawn("Husk", 20, 2)  # the first fight, ~10 seconds in
+    r.block(28, 2, 3)  # a little jump practice, after the fight
+    r.block(31, 3, 4)
     r.hatch_floor(40, 3, "A2", "top")
 
 
@@ -169,13 +169,16 @@ def build_A2():
     r = new("A2", "Broken Ledges", "Ashen", 56, 20)
     r.entry("top", 4, 13, 1)
     r.entry("east", 52, 2, -1)
-    r.block(1, 9, 13)  # the arrival ledge (solid to the floor: nothing to get stuck under)
-    r.plat(13, 5, 11)
-    r.plat(22, 5, 9)
-    r.plat(30, 5, 7)
-    r.plat(38, 5, 5)
-    r.spikes(10, 36)  # the floor below is deadly
-    r.spawn("Husk", 40, 5)  # guards the last ledge
+    r.block(1, 9, 13)  # the arrival ledge (solid to the floor)
+    # Wide platforms, one-tile gaps, three-tile drops: walk off and land.
+    r.plat(10, 6, 10)
+    r.plat(17, 7, 7)
+    r.plat(25, 6, 4)
+    r.spikes(33, 3)  # one small patch to hop over
+    r.spawn("Dummy", 34.5, 4)  # an optional pogo target above it
+    r.spawn("Husk", 20, 7)  # on the middle platform
+    r.spawn("Husk", 40, 2)
+    r.bench(47, 2)  # the first bench, before the door
     r.hatch_ceiling(3, 4, "A1", "hatch")
     r.door_right(2, "A3", "west")
 
@@ -187,8 +190,8 @@ def build_A3():
     r.block(11, 2, 3)
     r.block(20, 5, 4)
     r.spawn("Husk", 17, 2)
-    r.spawn("Husk", 22, 4)
-    r.spawn("Husk", 30, 2)
+    r.spawn("Wisp", 26, 6)  # a flier: the first thing that is not on the ground
+    r.spawn("Husk", 31, 2)
     r.bench(41, 2)
     r.door_left(2, "A2", "east")
     r.door_right(2, "A4", "west")
@@ -198,15 +201,11 @@ def build_A4():
     r = new("A4", "The Spike Pit", "Ashen", 56, 18)
     r.entry("west", 4, 2, 1)
     r.entry("east", 52, 2, -1)
-    r.spikes(12, 32)
-    r.plat(15, 3, 5)
-    r.plat(23, 3, 7)
-    r.plat(31, 3, 5)
-    r.plat(39, 3, 7)
-    # Floating punching bags over the spikes: pogo across if you prefer.
-    for x, y in [(20.5, 5.0), (28.5, 6.0), (36.5, 5.0)]:
-        r.spawn("Dummy", x, y)
-    r.spawn("Wisp", 28, 12)
+    r.spikes(23, 8)  # one pit, crossed by a stepping platform (or by pogo)
+    r.plat(25, 4, 5)
+    r.spawn("Wisp", 26, 9)  # hovers over the pit: fight it, or pogo it across
+    r.spawn("Husk", 40, 2)
+    r.spawn("Wisp", 34, 10)
     r.door_left(2, "A3", "east")
     r.door_right(2, "B1", "west")
 

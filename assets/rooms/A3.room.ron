@@ -21,8 +21,8 @@
     ],
     spawns: [
         (kind: Husk, at: (17.0, 2.0)),
-        (kind: Husk, at: (22.0, 4.0)),
-        (kind: Husk, at: (30.0, 2.0)),
+        (kind: Wisp, at: (26.0, 6.0)),
+        (kind: Husk, at: (31.0, 2.0)),
     ],
     entries: [
         (name: "west", at: (4.0, 2.0), facing: 1),
