@@ -301,7 +301,6 @@ fn ground_creatures_stand_on_solid_ground() {
 /// the fade, the swap, arriving where the destination says, and staying there.
 #[test]
 fn every_door_leads_where_it_says_and_you_arrive_safely() {
-    use bevy_ecs::prelude::*;
     use hk_sim::components::SimPos;
     use hk_sim::player::spawn_player;
     use hk_sim::testing::Harness;

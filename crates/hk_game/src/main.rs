@@ -130,7 +130,10 @@ fn main() {
         toast::ToastPlugin,
         hud::HudPlugin,
         audio::AudioPlugin,
-        menu::MenuPlugin { skip_title },
+        menu::MenuPlugin {
+            skip_title,
+            ignore_save: args.iter().any(|a| a == "--new"),
+        },
         save_io::SavePlugin {
             enabled: autosave,
             dir: save_dir,

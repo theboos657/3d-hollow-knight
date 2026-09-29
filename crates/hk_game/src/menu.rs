@@ -17,7 +17,13 @@ use crate::world_view::{begin_game, StartMode};
 pub struct MenuPlugin {
     /// Start straight in the game (developer and scripted runs).
     pub skip_title: bool,
+    /// `--new`: pretend there is no saved game (the title offers only New Game).
+    pub ignore_save: bool,
 }
+
+/// Set by `--new`.
+#[derive(Resource)]
+struct IgnoreSave(bool);
 
 impl Plugin for MenuPlugin {
     fn build(&self, app: &mut App) {
@@ -26,6 +32,7 @@ impl Plugin for MenuPlugin {
         } else {
             Screen::Title
         })
+        .insert_resource(IgnoreSave(self.ignore_save))
         .init_resource::<Menu>()
         .init_resource::<EndTimer>()
         .add_systems(Startup, init_menu)
@@ -97,8 +104,9 @@ enum Item {
     KeepExploring,
 }
 
-fn init_menu(dir: Res<SaveDir>, mut menu: ResMut<Menu>) {
-    menu.has_save = save_io::load(&dir.0).is_some();
+fn init_menu(dir: Res<SaveDir>, ignore: Option<Res<IgnoreSave>>, mut menu: ResMut<Menu>) {
+    let ignore = ignore.is_some_and(|i| i.0);
+    menu.has_save = !ignore && save_io::load(&dir.0).is_some();
 }
 
 fn action_name(a: Action) -> &'static str {
