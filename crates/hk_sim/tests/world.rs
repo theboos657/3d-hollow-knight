@@ -216,3 +216,81 @@ fn every_room_has_a_way_back_and_benches_are_where_the_fights_are() {
         );
     }
 }
+
+/// Arriving in a room should never put you inside an enemy's aggro range: a
+/// fair arrival is a chance to look before you are in a fight.
+#[test]
+fn nothing_is_waiting_on_top_of_a_doorway() {
+    let lib = library();
+    let t = tuning();
+    let aggro_of = |k: SpawnKind| match k {
+        SpawnKind::Husk => t.enemies.husk.aggro_radius,
+        SpawnKind::Wisp => t.enemies.wisp.aggro_radius,
+        SpawnKind::Shieldbearer => t.enemies.shield.aggro_radius,
+        SpawnKind::Spitter => t.enemies.spitter.aggro_radius,
+        _ => 0.0,
+    };
+    let mut bad = Vec::new();
+    for id in lib.ids() {
+        if matches!(id, "sandbox" | "dev_matron" | "dev_bellwarden") {
+            continue;
+        }
+        let d = lib.get(id).unwrap();
+        for e in &d.entries {
+            for (i, s) in d.spawns.iter().enumerate() {
+                if matches!(
+                    s.kind,
+                    SpawnKind::Dummy | SpawnKind::Matron | SpawnKind::Bellwarden
+                ) {
+                    continue;
+                }
+                let (dx, dy) = ((e.at.0 - s.at.0).abs(), (e.at.1 - s.at.1).abs());
+                if dx < aggro_of(s.kind) + 1.5 && dy < 4.5 {
+                    bad.push(format!(
+                        "{id}: {:?} #{i} at ({}, {}) is {dx:.1} tiles from entry `{}`",
+                        s.kind, s.at.0, s.at.1, e.name
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "creatures too close to a doorway:\n{}",
+        bad.join("\n")
+    );
+}
+
+/// Ground creatures must be placed on something to stand on (else they drop
+/// into a pit or spikes the moment the room loads), and never on spikes.
+#[test]
+fn ground_creatures_stand_on_solid_ground() {
+    use hk_sim::world::grid::Tile;
+    let lib = library();
+    let mut bad = Vec::new();
+    for id in lib.ids() {
+        let d = lib.get(id).unwrap();
+        let grid = d.grid();
+        for (i, s) in d.spawns.iter().enumerate() {
+            if !matches!(
+                s.kind,
+                SpawnKind::Husk | SpawnKind::Shieldbearer | SpawnKind::Spitter
+            ) {
+                continue;
+            }
+            let below = grid.get(s.at.0.floor() as i32, (s.at.1 - 0.5).floor() as i32);
+            let here = grid.get(s.at.0.floor() as i32, s.at.1.floor() as i32);
+            if !matches!(below, Tile::Solid | Tile::OneWay) || here == Tile::Spike {
+                bad.push(format!(
+                    "{id}: {:?} #{i} at ({}, {}) has {below:?} below it",
+                    s.kind, s.at.0, s.at.1
+                ));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "floating or misplaced creatures:\n{}",
+        bad.join("\n")
+    );
+}

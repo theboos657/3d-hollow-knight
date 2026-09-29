@@ -175,7 +175,7 @@ def build_A2():
     r.plat(30, 5, 7)
     r.plat(38, 5, 5)
     r.spikes(10, 36)  # the floor below is deadly
-    r.spawn("Husk", 50, 2)
+    r.spawn("Husk", 40, 5)  # guards the last ledge
     r.hatch_ceiling(3, 4, "A1", "hatch")
     r.door_right(2, "A3", "west")
 
@@ -188,7 +188,7 @@ def build_A3():
     r.block(20, 5, 4)
     r.spawn("Husk", 17, 2)
     r.spawn("Husk", 22, 4)
-    r.spawn("Husk", 33, 2)
+    r.spawn("Husk", 30, 2)
     r.bench(41, 2)
     r.door_left(2, "A2", "east")
     r.door_right(2, "A4", "west")
@@ -227,7 +227,7 @@ def build_B1():
     for i, x in enumerate([13, 21, 29, 37, 45]):
         r.plat(x, 5, 5 + 3 * i)
     r.slab(54, 9, 20, 2)  # the high ledge
-    r.spawn("Husk", 10, 2)
+    r.spawn("Husk", 18, 2)
     r.spawn("Wisp", 36, 17)
     r.hatch_floor(51, 4, "C1", "top")
     r.door_left(2, "A4", "east")
@@ -243,8 +243,9 @@ def build_B2():
     r.block(30, 6, 5)
     r.plat(20, 8, 8)
     r.plat(38, 8, 8)
-    for x in (10, 24, 41, 48):
+    for x in (24, 41):
         r.spawn("Husk", x, 2)
+    r.spawn("Husk", 16, 4)  # on top of the first block
     r.spawn("Husk", 33, 5)  # on top of the taller block
     r.spawn("Wisp", 32, 10)
     r.door_left(2, "B1", "east")
@@ -295,9 +296,9 @@ def build_C1():
     r.plat(19, 4, 7)
     r.plat(24, 3, 4)
     r.spikes(33, 6)  # six tiles of spikes: only a dash crosses
-    r.spawn("Husk", 46, 2)
-    r.spawn("Husk", 52, 2)
-    r.spawn("Spitter", 58, 2)
+    r.spawn("Husk", 42, 2)
+    r.spawn("Husk", 45, 2)
+    r.spawn("Spitter", 46, 2)
     r.hatch_ceiling(3, 4, "B1", "hatch")
     r.door_right(2, "C2", "west")
 
@@ -397,7 +398,7 @@ def build_D3():
     r.entry("east", 80, 2, -1)
     # 1: husks and thin platforms
     r.plat(10, 5, 6)
-    r.spawn("Husk", 14, 2)
+    r.spawn("Husk", 17, 2)
     r.spawn("Husk", 22, 2)
     # 2: a dash over spikes
     r.spikes(27, 6)

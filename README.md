@@ -1,9 +1,10 @@
 # Hollow Toll (Hollow Knight 3D)
 
-A complete, roughly one-hour 2.5D Metroidvania in the spirit of a "Hollow Knight 3":
-tight combat-platforming on a 2D gameplay plane, with true 3D lighting, depth and
-parallax. Sixteen interconnected rooms in four areas, two movement abilities, a
-mid-boss and a final boss. Built in Rust with [Bevy](https://bevy.org) 0.18.
+A complete 2.5D Metroidvania in the spirit of a "Hollow Knight 3": tight
+combat-platforming on a 2D gameplay plane, with true 3D lighting, depth and parallax.
+Sixteen interconnected rooms in four areas, two movement abilities, a mid-boss and a
+final boss, aimed at about an hour for a first playthrough (my estimate; nobody has
+timed it). Built in Rust with [Bevy](https://bevy.org) 0.18.
 
 *Nym, who cannot hear, climbs the bell-city of Vael. The Bellwarden's toll hollows
 all who listen.* Everything here (names, creatures, areas, sounds, art) is original;
