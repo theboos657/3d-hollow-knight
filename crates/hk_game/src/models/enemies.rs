@@ -1442,7 +1442,6 @@ pub fn animate_creatures(
             clock: anim.clock,
             walk: anim.walk,
             vx,
-            vy: vel.y,
             aim: aim_v.y.atan2((aim_v.x * fwd).max(0.05)),
             guard: anim.guard,
             hit: anim.hit,

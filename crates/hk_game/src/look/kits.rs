@@ -1,4 +1,3 @@
-#![allow(dead_code)] // the decor pass (stalactites, lantern strings) uses the rest
 //! The architecture behind the play lane: for each area a "kit" of large
 //! silhouettes built from `meshkit` pieces (pillars and pointed arches,
 //! mushrooms and roots, hanging bells, stained-glass windows, giant ribs),

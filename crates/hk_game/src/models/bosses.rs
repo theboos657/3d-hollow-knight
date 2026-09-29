@@ -590,7 +590,6 @@ pub fn animate_bosses(
             clock: anim.clock,
             walk: anim.walk,
             vx,
-            vy: vel.y,
             aim: 0.0,
             guard: 1.0,
             hit: anim.hit,

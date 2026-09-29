@@ -1,4 +1,3 @@
-#![allow(dead_code)] // helpers are used progressively by the models
 //! Animation maths for the models: pure functions from simulation state and a
 //! clock to joint transforms, so all of it is unit-tested without a renderer.
 //!
@@ -270,6 +269,7 @@ pub struct KnightPose {
 }
 
 impl KnightPose {
+    #[cfg(test)]
     pub fn blade_angle(&self) -> f32 {
         self.joints[knight_joint::SWORD_ARM].rot
     }

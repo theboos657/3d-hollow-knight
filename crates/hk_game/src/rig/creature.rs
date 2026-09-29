@@ -1,4 +1,3 @@
-#![allow(dead_code)] // wired up by models/enemies.rs
 //! Pose maths for the enemies and the training dummy: pure functions from the
 //! simulation's state (the enemy `Brain`, its velocity) and a clock to joint
 //! transforms, so every tell is unit-tested without a renderer.
@@ -138,7 +137,6 @@ pub struct CreatureIn {
     pub walk: f32,
     /// Speed along the facing direction (negative when backing away).
     pub vx: f32,
-    pub vy: f32,
     /// Aim angle in model space (0 forward, 90 degrees up).
     pub aim: f32,
     /// Where a Shieldbearer's shield is: +1 in front, -1 behind.
@@ -169,7 +167,6 @@ impl Default for CreatureIn {
             clock: 0.0,
             walk: 0.0,
             vx: 0.0,
-            vy: 0.0,
             aim: 0.0,
             guard: 1.0,
             hit: 0.0,
@@ -208,6 +205,7 @@ impl CreaturePose {
 
     /// How different two poses look: used to check that every tell has a
     /// silhouette of its own, not just a colour.
+    #[cfg(test)]
     pub fn distance(&self, other: &CreaturePose) -> f32 {
         let mut d = (self.lean - other.lean).abs() * 2.0
             + (self.drop - other.drop).abs() * 4.0

@@ -1,4 +1,3 @@
-#![allow(dead_code)] // the toolkit is used progressively by the models
 //! Procedural geometry for the creature and prop models: revolved surfaces
 //! (helms, cloaks, bells, shells), tubes (arms, tendrils, chains), ribbons,
 //! blades, prisms and slash crescents. Everything here is pure maths returning
@@ -31,6 +30,7 @@ impl MeshData {
         self.pos.len()
     }
 
+    #[cfg(test)]
     pub fn triangle_count(&self) -> usize {
         self.idx.len() / 3
     }
@@ -120,6 +120,7 @@ impl MeshData {
         self
     }
 
+    #[cfg(test)]
     pub fn bounds(&self) -> (Vec3, Vec3) {
         let mut lo = Vec3::splat(f32::MAX);
         let mut hi = Vec3::splat(f32::MIN);
@@ -133,6 +134,7 @@ impl MeshData {
     /// Structural checks: sizes agree, indices in range, everything finite,
     /// normals are unit length and no triangle faces *against* its vertex
     /// normals (the sign of a wrong winding).
+    #[cfg(test)]
     pub fn validate(&self) -> Result<(), String> {
         let n = self.pos.len();
         if n == 0 || self.idx.is_empty() {
