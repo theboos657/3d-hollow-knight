@@ -32,6 +32,9 @@ const RESPAWN_IFRAMES_MS: f32 = 500.0;
 /// Safe ground is never recorded this close to a hazard (world units), so a
 /// spike respawn can't drop the player right back onto the spikes.
 const HAZARD_MARGIN: f32 = 1.5;
+
+/// Further below the world than this and the player is put back on safe ground.
+const FALL_LIMIT: f32 = 20.0;
 pub fn player_status(
     mut commands: Commands,
     tuning: Res<Tuning>,
@@ -77,6 +80,13 @@ pub fn player_status(
                 respawned.write(PlayerRespawned);
             }
             continue;
+        }
+
+        // Safety net: never lose the player to the void (a hole in a room the
+        // author forgot, a debug teleport). They come back where they last stood.
+        if pos.0.y < -FALL_LIMIT {
+            pos.0 = safe.pos;
+            vel.0 = Vec2::ZERO;
         }
 
         cs.stun = cs.stun.saturating_sub(1);

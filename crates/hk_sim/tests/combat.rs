@@ -712,3 +712,18 @@ fn a_scripted_fight_replays_bit_identically() {
 
 #[allow(dead_code)]
 fn _unused(_: &TileGrid) {}
+
+#[test]
+fn falling_out_of_the_world_puts_you_back_on_safe_ground() {
+    let (mut h, p) = flat_scene(NONE);
+    h.tick_n(30); // stand long enough for the spot to count as safe
+    let safe = pos(&h, p);
+    h.world_mut().get_mut::<SimPos>(p).unwrap().0 = Vec2::new(10.0, -60.0);
+    h.tick_n(2);
+    let back = pos(&h, p);
+    assert!(
+        (back.x - safe.x).abs() < 0.5 && back.y > 0.0,
+        "put back near {safe:?}, got {back:?}"
+    );
+    assert_eq!(hp(&h, p), 5, "no damage for falling out of the world");
+}
