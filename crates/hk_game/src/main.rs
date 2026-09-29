@@ -183,7 +183,7 @@ fn main() {
             Some(q) => {
                 app.insert_resource(look::quality::QualityOverride(Some(q)));
             }
-            None => eprintln!("--quality wants low, medium or high (got `{q}`)"),
+            None => eprintln!("--quality wants low, medium, high or ultra (got `{q}`)"),
         }
     }
     if args.iter().any(|a| a == "--show-hitboxes") {

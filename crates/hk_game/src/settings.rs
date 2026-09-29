@@ -39,24 +39,29 @@ pub fn key_from_name(name: &str) -> Option<KeyCode> {
     KEY_TABLE.iter().find(|(_, n)| *n == name).map(|(c, _)| *c)
 }
 
-/// How much the renderer is asked to do. Medium is the default; Low is for
-/// weak or integrated GPUs, High adds sharper edges and ambient occlusion.
+/// How much the renderer is asked to do. Ultra is the default and the look the
+/// game is made for; the lower tiers step down for weaker GPUs:
+/// Low (no shadows), Medium (shadows), High (sharper edges, ambient occlusion,
+/// image-based light), Ultra (temporal anti-aliasing, volumetric haze, depth of
+/// field, film response).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Quality {
     Low,
-    #[default]
     Medium,
     High,
+    #[default]
+    Ultra,
 }
 
 impl Quality {
-    pub const ALL: [Quality; 3] = [Quality::Low, Quality::Medium, Quality::High];
+    pub const ALL: [Quality; 4] = [Quality::Low, Quality::Medium, Quality::High, Quality::Ultra];
 
     pub fn name(self) -> &'static str {
         match self {
             Quality::Low => "Low",
             Quality::Medium => "Medium",
             Quality::High => "High",
+            Quality::Ultra => "Ultra",
         }
     }
 
@@ -147,6 +152,9 @@ pub struct Settings {
     pub sfx: f32,
     pub shake: bool,
     pub vsync: bool,
+    /// The graphics tier. (Saved as `graphics`: files from when Medium was the
+    /// default, and the old key was `quality`, come up on the new default.)
+    #[serde(rename = "graphics")]
     pub quality: Quality,
     /// Tutorial prompts the player has already been shown.
     pub tips_seen: Vec<crate::tutorial::Tip>,
@@ -162,7 +170,7 @@ impl Default for Settings {
             sfx: 0.9,
             shake: true,
             vsync: true,
-            quality: Quality::Medium,
+            quality: Quality::Ultra,
             tips_seen: Vec::new(),
             keys: Layout::Wasd.keys(),
         }
@@ -364,14 +372,31 @@ mod tests {
     #[test]
     fn quality_steps_wrap_and_parse_by_name() {
         assert_eq!(Quality::Low.step(true), Quality::Medium);
-        assert_eq!(Quality::High.step(true), Quality::Low);
-        assert_eq!(Quality::Low.step(false), Quality::High);
+        assert_eq!(Quality::High.step(true), Quality::Ultra);
+        assert_eq!(Quality::Ultra.step(true), Quality::Low);
+        assert_eq!(Quality::Low.step(false), Quality::Ultra);
         assert_eq!(Quality::parse("high"), Some(Quality::High));
         assert_eq!(Quality::parse("MEDIUM"), Some(Quality::Medium));
-        assert_eq!(Quality::parse("ultra"), None);
-        // Old settings files (from before there was a quality setting) get Medium.
+        assert_eq!(Quality::parse("ultra"), Some(Quality::Ultra));
+        assert_eq!(Quality::parse("extreme"), None);
+    }
+
+    #[test]
+    fn old_settings_files_come_up_on_ultra_and_a_chosen_tier_is_remembered() {
+        // From before there was a graphics setting, or when it was `quality`.
         let s: Settings = ron::from_str("(master: 0.5, vsync: false)").unwrap();
-        assert_eq!(s.quality, Quality::Medium);
+        assert_eq!(s.quality, Quality::Ultra);
+        let s: Settings = ron::from_str("(quality: Medium)").unwrap();
+        assert_eq!(s.quality, Quality::Ultra, "the old key is ignored");
+        // A tier picked in the menu round-trips.
+        let s = Settings {
+            quality: Quality::Low,
+            ..Settings::default()
+        };
+        let text = ron::to_string(&s).unwrap();
+        assert!(text.contains("graphics"));
+        let back: Settings = ron::from_str(&text).unwrap();
+        assert_eq!(back.quality, Quality::Low);
     }
 
     #[test]

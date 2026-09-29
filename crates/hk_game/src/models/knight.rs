@@ -672,6 +672,7 @@ pub fn spawn_player_model(
         ));
         commands.entity(e).with_children(|p| {
             p.spawn((
+                crate::look::NoHalo,
                 PointLight {
                     intensity: 900_000.0,
                     range: 24.0,

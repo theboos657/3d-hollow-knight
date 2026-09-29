@@ -131,6 +131,7 @@ fn sync_stage(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     pbr: Res<Materials>,
+    mut look: ResMut<crate::look::LookState>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut cam: Query<(&mut DistanceFog, &mut ColorGrading), With<MainCamera>>,
@@ -160,7 +161,8 @@ fn sync_stage(
     // Moonlight: cool key, a warm rim from the fire, deep indigo fog.
     let st = style(hk_sim::world::room::Theme::Cistern);
     ambient.color = Color::srgb(0.30, 0.38, 0.72);
-    ambient.brightness = 190.0;
+    look.theme = hk_sim::world::room::Theme::Cistern;
+    look.ambient_brightness = 190.0;
     let fog_colour = Color::srgb(0.03, 0.045, 0.10);
     clear.0 = fog_colour;
     for (mut fog, mut grading) in &mut cam {

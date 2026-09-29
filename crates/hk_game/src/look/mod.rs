@@ -4,6 +4,8 @@
 
 pub mod decor;
 pub mod fixtures;
+pub mod grain;
+pub mod ibl;
 pub mod kits;
 pub mod level;
 pub mod pbr;
@@ -94,24 +96,53 @@ pub struct KeyLight;
 #[derive(Component)]
 pub struct RimLight;
 
+/// A point light that must not glow in the volumetric haze: one that sits in
+/// the middle of the play lane, where a view ray passes so close to it that the
+/// haze's scattering blows up into a black speck.
+#[derive(Component)]
+pub struct NoHalo;
+
+/// What the current area asks of the shared lighting (set when a room or the
+/// title stage is built), so the tier systems can apply it.
+#[derive(Resource)]
+pub struct LookState {
+    pub theme: hk_sim::world::room::Theme,
+    /// The flat ambient light brightness the area is tuned for (image-based
+    /// light replaces most of it where the tier has it).
+    pub ambient_brightness: f32,
+}
+
+impl Default for LookState {
+    fn default() -> Self {
+        LookState {
+            theme: hk_sim::world::room::Theme::Ashen,
+            ambient_brightness: 250.0,
+        }
+    }
+}
+
 pub struct LookPlugin;
 
 impl Plugin for LookPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(pbr::PbrPlugin)
-            .init_resource::<quality::QualityOverride>()
-            .add_systems(
-                Update,
-                (
-                    room::rebuild_room,
-                    props::flicker,
-                    drift_motes,
-                    quality::apply_quality,
-                    fixtures::attach_fixtures,
-                    fixtures::attach_spikes,
-                    fixtures::animate_fixtures,
-                )
-                    .after(RenderPrepSet),
-            );
+        app.add_plugins((
+            pbr::PbrPlugin,
+            quality::QualityPlugin,
+            ibl::IblPlugin,
+            grain::GrainPlugin,
+        ))
+        .init_resource::<LookState>()
+        .add_systems(
+            Update,
+            (
+                room::rebuild_room,
+                props::flicker,
+                drift_motes,
+                fixtures::attach_fixtures,
+                fixtures::attach_spikes,
+                fixtures::animate_fixtures,
+            )
+                .after(RenderPrepSet),
+        );
     }
 }

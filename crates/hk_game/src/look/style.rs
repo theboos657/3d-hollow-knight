@@ -27,6 +27,8 @@ pub struct LookStyle {
     pub wet: f32,
     /// Whether the lip along floors is moss rather than bare stone.
     pub moss: bool,
+    /// How thick the air is (the volumetric haze's density; Ultra only).
+    pub haze: f32,
     /// Dust motes, fireflies.
     pub mote: Color,
     pub mote_emissive: LinearRgba,
@@ -57,6 +59,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 0.95,
             wet: 0.0,
             moss: false,
+            haze: 0.02,
             mote: c(0.2, 0.6, 0.9),
             mote_emissive: e(0.6, 2.4, 4.0),
             flame: e(1.0, 2.6, 4.0),
@@ -79,6 +82,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 1.0,
             wet: 0.0,
             moss: false,
+            haze: 0.03,
             mote: c(0.9, 0.6, 0.3),
             mote_emissive: e(3.0, 1.6, 0.5),
             flame: e(3.6, 1.7, 0.45),
@@ -101,6 +105,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 0.9,
             wet: 0.12,
             moss: true,
+            haze: 0.05,
             mote: c(0.4, 0.9, 0.5),
             mote_emissive: e(1.0, 3.0, 1.2),
             flame: e(1.0, 3.2, 1.2),
@@ -123,6 +128,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 0.62,
             wet: 0.35,
             moss: false,
+            haze: 0.06,
             mote: c(0.3, 0.8, 0.9),
             mote_emissive: e(0.6, 2.8, 3.4),
             flame: e(0.6, 2.6, 3.4),
@@ -145,6 +151,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 0.72,
             wet: 0.2,
             moss: false,
+            haze: 0.03,
             mote: c(0.95, 0.8, 0.45),
             mote_emissive: e(3.0, 2.2, 0.8),
             flame: e(3.4, 2.4, 0.8),
@@ -167,6 +174,7 @@ pub fn style(t: Theme) -> LookStyle {
             roughness: 0.95,
             wet: 0.0,
             moss: false,
+            haze: 0.045,
             mote: c(0.95, 0.35, 0.3),
             mote_emissive: e(3.5, 0.6, 0.5),
             flame: e(3.8, 0.9, 0.4),
@@ -219,6 +227,10 @@ mod tests {
             assert!((0.4..=1.0).contains(&s.roughness) && (0.0..=0.6).contains(&s.wet));
         }
         assert!(style(Theme::Warrens).moss && !style(Theme::Throne).moss);
+        for t in THEMES {
+            assert!((0.01..0.1).contains(&style(t).haze), "{t:?}: haze");
+        }
+        assert!(style(Theme::Cistern).haze > style(Theme::Ashen).haze);
     }
 
     #[test]

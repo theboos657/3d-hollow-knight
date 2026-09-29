@@ -1,6 +1,6 @@
 //! Building the current room's scenery when it is entered.
 
-use bevy::light::NotShadowCaster;
+use bevy::light::{FogVolume, NotShadowCaster};
 use bevy::pbr::DistanceFog;
 use bevy::prelude::*;
 use bevy::render::view::ColorGrading;
@@ -11,12 +11,11 @@ use super::kits::{build_kit, WALL_Z};
 use super::level::{build_level, wall_mesh};
 use super::pbr::{Kind, Materials};
 use super::props::{brazier_meshes, pick_spots, Flame};
-use super::quality::{current, plan, QualityOverride};
+use super::quality::CurrentPlan;
 use super::style::{style, LookStyle};
-use super::{KeyLight, Mote, RimLight, RoomVisual};
+use super::{KeyLight, LookState, Mote, RimLight, RoomVisual};
 use crate::rig::meshkit::hash3;
 use crate::scene::MainCamera;
-use crate::settings::Settings;
 
 /// A stable seed from a room's id, so a room always looks the same.
 pub fn room_seed(id: &str) -> u32 {
@@ -155,8 +154,8 @@ pub fn rebuild_room(
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     pbr: Res<Materials>,
-    settings: Res<Settings>,
-    forced: Res<QualityOverride>,
+    plan: Res<CurrentPlan>,
+    mut look: ResMut<LookState>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut cam: Query<(&mut DistanceFog, &mut ColorGrading), With<MainCamera>>,
@@ -176,7 +175,8 @@ pub fn rebuild_room(
     let seed = room_seed(&def.id);
 
     ambient.color = st.ambient;
-    ambient.brightness = st.ambient_brightness;
+    look.theme = def.theme;
+    look.ambient_brightness = st.ambient_brightness;
     clear.0 = st.fog;
     for (mut fog, mut grading) in &mut cam {
         fog.color = st.fog;
@@ -197,12 +197,7 @@ pub fn rebuild_room(
     }
 
     let grid = def.grid();
-    let lm = level_mats(
-        &mut mats,
-        &pbr,
-        &st,
-        plan(current(&settings, &forced)).parallax,
-    );
+    let lm = level_mats(&mut mats, &pbr, &st, plan.0.parallax);
     spawn_level(&mut commands, &mut meshes, &lm, &grid, seed, RoomVisual);
     commands.spawn((
         RoomVisual,
@@ -258,6 +253,24 @@ pub fn rebuild_room(
             Transform::IDENTITY,
         ));
     }
+
+    // The air: a volume of haze over the whole hall. Only tiers with
+    // volumetrics see it (the camera has to ask for it).
+    let (w, h) = (grid.width() as f32, grid.height() as f32);
+    commands.spawn((
+        RoomVisual,
+        FogVolume {
+            fog_color: st.rim.mix(&st.key, 0.5),
+            density_factor: st.haze,
+            absorption: 0.2,
+            scattering: 0.4,
+            scattering_asymmetry: 0.3,
+            light_tint: Color::WHITE,
+            light_intensity: 1.0,
+            ..default()
+        },
+        Transform::from_xyz(w / 2.0, h / 2.0, -2.0).with_scale(Vec3::new(w + 60.0, h + 40.0, 24.0)),
+    ));
 
     // Braziers: iron stands with a flame and a flickering pool of light.
     let (stand, flame) = brazier_meshes();
