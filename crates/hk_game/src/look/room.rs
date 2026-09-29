@@ -71,6 +71,8 @@ pub fn spawn_level<M: Bundle + Clone>(
     ));
     commands.spawn((
         marker,
+        // Planks would throw floating bars of shadow on the far wall.
+        NotShadowCaster,
         Mesh3d(meshes.add(geo.planks.to_mesh())),
         MeshMaterial3d(plank),
         Transform::IDENTITY,

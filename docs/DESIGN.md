@@ -175,6 +175,49 @@ to the room (rooms smaller than the view are centred); trauma-based shake (trans
 In a boss fight it leans toward the boss so both stay in frame. It is a pure function with its
 own tests (bounds never violated, hysteresis, no jitter).
 
+## 7b. Look
+
+**Visual language.** One rule: *what you can hit or be hit by is bright and shaped; what you
+stand in is textured and lit.* Everything hostile shares one colour language (yellow "!", flashing
+amber windup, red strike, blue recovery, white stagger; pinned by a test) and every windup also has
+its own silhouette. Hazards (spikes, falling bells) are violet crystals and gold bells; exits are
+pale blue-white in every area; benches and braziers are warm.
+
+**Built in code.** `rig/meshkit.rs` makes shapes (lathe, tube, ribbon, blade, extrusion,
+crescent) and validates them (finite, unit normals, no flipped faces); `rig/pose.rs` and
+`rig/creature.rs` are pure functions from simulation state to joint transforms, so animation is
+unit-tested without a renderer. A model is a hierarchy `anchor (sim position) > model root >
+squash > facing (yaw, never a negative scale) > lean > joints > parts`; the same `apply` function
+poses the game's knight and the viewer's (`--viewer`).
+
+**The sword is synchronised with the hitbox.** The swing pose is a function of the nail's real
+timing (startup 4 ticks, active 11) read from combat state, with a clock that stops during
+hitstop; a test builds a real simulation, swings in every direction, and checks the drawn blade
+passes through the live hitbox on every tick it exists (0.3 u slack), so retuning the reach in
+`combat.ron` cannot desynchronise the picture.
+
+**The level.** `look/level.rs` turns tiles into chamfered blocks whose brightness falls off with
+distance from open air; `look/kits.rs` builds each area's architecture at three depths in front of
+a chamber wall (parallax from the real perspective camera); `look/decor.rs` adds growth, rubble
+and stalactites (taller behind the play lane than in front of it, so the knight's feet stay
+visible); `look/style.rs` holds every area's palette and grading (tests keep ledges readable and
+areas distinguishable). Everything is seeded from the room id.
+
+**Lighting.** A shadow-casting key light tinted per area, a weak cool rim light, per-area ambient
+and colour grading, flickering braziers, the knight's own lantern, bench and door lights, and
+additive light shafts. Level stone and one-way planks do not cast shadows (a ceiling's shadow
+lands on the wall as a black bar); actors and props do.
+
+**Camera** distance 23.2 -> 19.5 so characters read at a glance (the knight was ~68 px tall at
+720p before; the visible height is now about 13.4 u, still enough to see a full jump).
+
+**Graphics tiers** are in `look/quality.rs`: Low (no shadows, FXAA), Medium (2048 shadows, SMAA,
+the default), High (4096 shadows, SMAA high, SSAO).
+
+**Teaching.** `tutorial.rs` replaces a paragraph of controls with prompts shown at the moment they
+matter (move, strike, the tell colours, pogo, bench, focus, dash, grip), using the player's own key
+bindings, once each; a marker hangs over the first training dummy until it is hit.
+
 ## 8. Audio
 
 `tools/gen_audio.py` synthesises 26 effects and 8 loops (a bell-and-drone palette) with the
@@ -192,7 +235,9 @@ tick has 8333 us).
 
 Not verifiable in the environment this was built in (no GPU, no speakers, no human): **feel**,
 how the rooms *play* (enemy placement, pacing), how hard the bosses are for a person, how the
-music sounds, perceived input latency, and behaviour on your GPU/OS.
+music sounds, perceived input latency, how the animation looks *in motion*, frame rate on real
+hardware, and behaviour on your GPU/OS. The art was checked frame by frame through a software
+renderer and by unit tests of its geometry and animation maths.
 
 ## 10. Playtest checklist
 
@@ -241,7 +286,9 @@ All in `assets/tuning/*.ron`, no rebuild needed.
 
 ## 11. Known limitations
 
-* Art is procedural boxes and lights. It is readable, not pretty.
+* Art is procedural: stylised and readable, but built from code shapes, not hand-sculpted;
+  animation is pose maths (no keyframed clips); nothing was seen moving before it was shipped.
+* Walk and run cycles are simple leg swings; there is no foot-planting on slopes (there are no slopes).
 * Rebinding is keyboard only; the gamepad layout is fixed.
 * One save slot. No map screen.
 * Music and sound are generated and simple; they are placeholders in the honest sense.
