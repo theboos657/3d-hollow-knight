@@ -87,6 +87,8 @@ pub struct Settings {
     pub shake: bool,
     pub vsync: bool,
     pub quality: Quality,
+    /// Tutorial prompts the player has already been shown.
+    pub tips_seen: Vec<crate::tutorial::Tip>,
     /// Keys per action (by name); the first is the one the menu rebinds.
     pub keys: Vec<(Action, Vec<String>)>,
 }
@@ -101,6 +103,7 @@ impl Default for Settings {
             shake: true,
             vsync: true,
             quality: Quality::Medium,
+            tips_seen: Vec::new(),
             keys: vec![
                 k(Action::Left, &["Left", "A"]),
                 k(Action::Right, &["Right", "D"]),

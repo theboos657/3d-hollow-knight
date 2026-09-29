@@ -77,15 +77,15 @@ impl Plugin for ViewerPlugin {
 
 /// One posed knight on the stage.
 #[derive(Component)]
-struct ViewerKnight {
-    input: KnightIn,
+pub(crate) struct ViewerKnight {
+    pub(crate) input: KnightIn,
     /// Swing direction and the tick to freeze it at.
-    swing: Option<(SwingDir, f32)>,
-    facing: i8,
-    tint: LinearRgba,
+    pub(crate) swing: Option<(SwingDir, f32)>,
+    pub(crate) facing: i8,
+    pub(crate) tint: LinearRgba,
 }
 
-fn pose(f: impl FnOnce(&mut KnightIn)) -> KnightIn {
+pub(crate) fn pose(f: impl FnOnce(&mut KnightIn)) -> KnightIn {
     let mut k = KnightIn {
         grounded: true,
         soul: 0.7,
@@ -230,7 +230,7 @@ fn build_stage(
 }
 
 #[allow(clippy::type_complexity)]
-fn animate_viewer(
+pub(crate) fn animate_viewer(
     time: Res<Time>,
     tuning: Res<Tuning>,
     assets: Option<Res<KnightAssets>>,

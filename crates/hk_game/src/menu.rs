@@ -494,10 +494,15 @@ fn menu_ui(
         Screen::Title => (
             "HOLLOW TOLL",
             "Nym, who cannot hear, climbs the bell-city of Vael.\nThe Bellwarden's toll hollows all who listen.".into(),
-            1.0,
+            0.16,
         ),
         Screen::Paused => ("PAUSED", String::new(), 0.8),
-        Screen::Options(_) => ("OPTIONS", "Left / Right change a value.".into(), 0.9),
+        Screen::Options(back) => (
+            "OPTIONS",
+            "Left / Right change a value.".into(),
+            // Over the title's diorama the panel can be lighter.
+            if *back == Back::Title { 0.6 } else { 0.9 },
+        ),
         Screen::Controls(_) => (
             "CONTROLS",
             if menu.note.is_empty() {

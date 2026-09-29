@@ -5,7 +5,7 @@
 //! later phases quickly).
 //!
 //! Moments: intro, telegraph, active, recover, transition, glyph, pendulum,
-//! dying, end (the end card); any other name just waits for the room to settle (`--shots room`).
+//! dying, end (the end card), title (the title screen; leave out `--room`); any other name just waits for the room to settle (`--shots room`).
 //! Files land in `out/shot_<moment>.png` (`--shot-prefix P_` adds a prefix).
 
 use bevy::prelude::*;
@@ -112,6 +112,8 @@ fn take_shots(
             "glyph" => glyphs.iter().any(|g| g.ticks < 50),
             "pendulum" => pendulums.iter().next().is_some(),
             "end" => *screen == crate::menu::Screen::Ended,
+            // The title screen (start without `--room`): once its stage has settled.
+            "title" => *screen == crate::menu::Screen::Title && *frames > 90,
             _ => *frames > 45,
         };
         if ready {

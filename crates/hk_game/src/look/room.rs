@@ -23,6 +23,61 @@ pub fn room_seed(id: &str) -> u32 {
     })
 }
 
+/// Spawns a level's stone blocks, floor lips and one-way planks in `st`'s
+/// palette, tagged with `marker`. Returns the stone-grain texture, so the caller
+/// can texture the wall the same way.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_level<M: Bundle + Clone>(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    mats: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+    st: &super::style::LookStyle,
+    grid: &hk_sim::world::grid::TileGrid,
+    seed: u32,
+    marker: M,
+) -> Handle<Image> {
+    let grain = stone_grain(images);
+    let mut textured = |base: Color, rough: f32| {
+        mats.add(StandardMaterial {
+            base_color: base,
+            base_color_texture: Some(grain.clone()),
+            perceptual_roughness: rough,
+            ..default()
+        })
+    };
+    let stone = textured(st.stone, 0.92);
+    let cap = textured(st.cap, 0.75);
+    let plank = textured(st.one_way, 0.85);
+    let geo = build_level(grid, seed);
+    for (first, m) in geo.chunks {
+        commands.spawn((
+            marker.clone(),
+            Name::new(format!("stone {first}")),
+            // The rock does not cast shadows: a whole ceiling's shadow lands on the
+            // wall as a heavy black bar. Actors and props still ground themselves.
+            NotShadowCaster,
+            Mesh3d(meshes.add(m.to_mesh())),
+            MeshMaterial3d(stone.clone()),
+            Transform::IDENTITY,
+        ));
+    }
+    commands.spawn((
+        marker.clone(),
+        NotShadowCaster,
+        Mesh3d(meshes.add(geo.caps.to_mesh())),
+        MeshMaterial3d(cap),
+        Transform::IDENTITY,
+    ));
+    commands.spawn((
+        marker,
+        Mesh3d(meshes.add(geo.planks.to_mesh())),
+        MeshMaterial3d(plank),
+        Transform::IDENTITY,
+    ));
+    grain
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn rebuild_room(
     mut commands: Commands,
@@ -55,6 +110,10 @@ pub fn rebuild_room(
     clear.0 = st.fog;
     for (mut fog, mut grading) in &mut cam {
         fog.color = st.fog;
+        fog.falloff = bevy::pbr::FogFalloff::Linear {
+            start: 22.0,
+            end: 80.0,
+        };
         grading.global.temperature = st.temperature;
         grading.global.post_saturation = st.saturation;
         grading.midtones.contrast = st.contrast;
@@ -67,47 +126,23 @@ pub fn rebuild_room(
         l.color = st.rim;
     }
 
-    let grain = stone_grain(&mut images);
-    let mut textured = |base: Color, rough: f32| {
-        mats.add(StandardMaterial {
-            base_color: base,
-            base_color_texture: Some(grain.clone()),
-            perceptual_roughness: rough,
-            ..default()
-        })
-    };
-    let stone = textured(st.stone, 0.92);
-    let cap = textured(st.cap, 0.75);
-    let plank = textured(st.one_way, 0.85);
-    let wall = textured(st.wall, 1.0);
-
     let grid = def.grid();
-    let geo = build_level(&grid, seed);
-    for (first, m) in geo.chunks {
-        commands.spawn((
-            RoomVisual,
-            Name::new(format!("stone {first}")),
-            // The rock does not cast shadows: a whole ceiling's shadow lands on the
-            // wall as a heavy black bar. Actors and props still ground themselves.
-            NotShadowCaster,
-            Mesh3d(meshes.add(m.to_mesh())),
-            MeshMaterial3d(stone.clone()),
-            Transform::IDENTITY,
-        ));
-    }
-    commands.spawn((
+    let grain = spawn_level(
+        &mut commands,
+        &mut meshes,
+        &mut mats,
+        &mut images,
+        &st,
+        &grid,
+        seed,
         RoomVisual,
-        NotShadowCaster,
-        Mesh3d(meshes.add(geo.caps.to_mesh())),
-        MeshMaterial3d(cap),
-        Transform::IDENTITY,
-    ));
-    commands.spawn((
-        RoomVisual,
-        Mesh3d(meshes.add(geo.planks.to_mesh())),
-        MeshMaterial3d(plank),
-        Transform::IDENTITY,
-    ));
+    );
+    let wall = mats.add(StandardMaterial {
+        base_color: st.wall,
+        base_color_texture: Some(grain.clone()),
+        perceptual_roughness: 1.0,
+        ..default()
+    });
     commands.spawn((
         RoomVisual,
         NotShadowCaster,

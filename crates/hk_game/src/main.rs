@@ -15,6 +15,7 @@ mod debug;
 mod demo;
 mod devices;
 mod hud;
+mod hud_art;
 mod interp;
 mod look;
 mod menu;
@@ -23,7 +24,9 @@ mod rig;
 mod save_io;
 mod scene;
 mod settings;
+mod title_scene;
 mod toast;
+mod tutorial;
 mod vfx;
 mod viewer;
 mod visuals;
@@ -56,7 +59,8 @@ fn main() {
     // A developer start (--room) never touches the save; otherwise continue
     // the saved game unless --new asks for a fresh one.
     // Scripted runs (smoke test, bot demo, screenshots) never read or write a save.
-    let scripted = smoke || bot || !shots.is_empty() || viewer;
+    // `--shots title` photographs the title screen, so it must not skip it.
+    let scripted = smoke || bot || (!shots.is_empty() && shots != ["title"]) || viewer;
     let start = match dev_room {
         _ if viewer => world_view::StartMode::Viewer,
         Some(room) => world_view::StartMode::Dev {
@@ -137,6 +141,9 @@ fn main() {
             models::enemies::EnemyModelsPlugin,
             look::LookPlugin,
             look::vignette::VignettePlugin,
+            hud_art::HudArtPlugin,
+            title_scene::TitleScenePlugin,
+            tutorial::TutorialPlugin,
             models::projectiles::ProjectilePlugin,
         ),
         boss_view::BossViewPlugin,

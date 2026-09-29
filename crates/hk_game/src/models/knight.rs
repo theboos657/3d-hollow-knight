@@ -382,6 +382,16 @@ pub struct KnightAnim {
     last_trail: Option<(usize, usize)>,
 }
 
+impl KnightAssets {
+    /// The cloak and helm meshes (for the dash afterimages).
+    pub fn cloak_mesh(&self) -> Handle<Mesh> {
+        self.cloak.clone()
+    }
+    pub fn helm_mesh(&self) -> Handle<Mesh> {
+        self.helm.clone()
+    }
+}
+
 impl Default for KnightAnim {
     fn default() -> Self {
         Self {
