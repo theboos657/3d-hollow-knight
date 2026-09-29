@@ -1,12 +1,18 @@
-# Hollow Knight 3D
+# Hollow Toll (Hollow Knight 3D)
 
-A 2.5D Metroidvania in the spirit of a "Hollow Knight 3": tight combat-platforming
-on a 2D gameplay plane with true 3D lighting, depth and parallax. Built in Rust with
-[Bevy](https://bevy.org) 0.18.
+A complete, roughly one-hour 2.5D Metroidvania in the spirit of a "Hollow Knight 3":
+tight combat-platforming on a 2D gameplay plane, with true 3D lighting, depth and
+parallax. Sixteen interconnected rooms in four areas, two movement abilities, a
+mid-boss and a final boss. Built in Rust with [Bevy](https://bevy.org) 0.18.
 
-> **Status:** work in progress. Playable today: the movement/combat **sandbox**
-> with four enemy types (below). Rooms, the boss and the world are being built
-> milestone by milestone.
+*Nym, who cannot hear, climbs the bell-city of Vael. The Bellwarden's toll hollows
+all who listen.* Everything here (names, creatures, areas, sounds, art) is original;
+it borrows the genre's mechanics and mood, nothing else.
+
+> **Honest status:** the game is complete and verified as far as a machine can verify
+> it (see [Verification](#verification)), but nobody has *played* it yet. Whether it
+> feels good is the one thing only you can judge; `docs/DESIGN.md` has a playtest
+> checklist and the ten numbers to turn first. Art is procedural greybox.
 
 ## Play it
 
@@ -20,70 +26,121 @@ on a 2D gameplay plane with true 3D lighting, depth and parallax. Built in Rust 
    cargo play
    ```
 
-   The first build takes several minutes (it compiles the whole engine); after that
-   it starts quickly. Always use the optimised build for feel testing.
+   The first build takes several minutes (it compiles the whole engine); after that it
+   starts quickly. Always use this optimised build to judge feel.
 
-## Controls (sandbox)
+The game saves at benches (and when you learn something or beat a boss) to
+`saves/slot1.ron`; **Continue** on the title screen picks it up. Delete that file (or
+choose **New Game**) to start over.
+
+## Controls
 
 | Action | Keyboard | Gamepad |
 |---|---|---|
 | Move | Arrows / WASD | D-pad / left stick |
-| Jump (hold = higher) | Space / Z | A (south) |
+| Jump (hold = higher, tap = hop) | Space / Z | A (south) |
 | Attack | X / J | X (west) |
-| Up / down attack | hold Up / Down + Attack (down only in the air, **pogo** off enemies and spikes) | same |
-| Dash | C / Left Shift | RB / B |
-| Focus (hold, heals 1 mask for 33 soul) | F | LT |
-| Ember Bolt (33 soul) | V | Y |
+| Up / down attack | hold Up / Down + Attack. Down in the air **pogoes** off enemies, spikes and golden bells | same |
+| Dash (after the Matron) | C / Left Shift | RT / B |
+| Wall slide + wall jump (after the shrine) | hold toward the wall, then Jump | same |
+| Focus: hold to heal one mask (costs 33 soul) | F | LT |
+| Ember Bolt (costs 33 soul) | V | Y |
 | Drop through a thin platform | Down + Jump | |
+| Rest at a bench | Up | Up |
+| Pause / options | Esc | Start |
 | Debug overlay | F1 | |
 
-Useful options: `cargo play -- --room ID` starts in another room (rooms live in
-`assets/rooms/*.room.ron`; the default is `sandbox`). Feel numbers live in
-`assets/tuning/*.ron` and are read at startup, so you can tweak jump height, dash
-speed, camera lead and so on and just restart, with no rebuild.
+Every key can be rebound in **Options -> Controls**. Volumes, screen shake and vsync
+are in Options too; they are kept in `saves/settings.ron`.
 
-The sandbox unlocks everything: try the wall-jump shaft on the left, the thin
-platforms, and the spike pit on the right (pogo off the floating dummy to cross it).
+## How to read the game
 
-Enemies (they all telegraph, and glow to show what they are doing):
+Everything that can hurt you announces itself first, in one colour language:
 
 | Colour | Meaning |
 |---|---|
-| yellow | just noticed you |
-| flashing orange | **windup**: an attack is coming, get out of the way |
-| red | attacking |
+| yellow | it just noticed you |
+| flashing orange / amber | **windup**: an attack is coming, get out of the way |
+| red | the attack is happening |
 | blue | recovering: **hit it now** |
 
-* **Husk** (red-brown): patrols, chases, lunges. 15 HP.
-* **Shieldbearer** (teal, white plate): the plate blocks nail and bolt from the front.
-  Pogo it from above, or hit it from behind while it turns slowly.
-* **Wisp** (purple ball): flies above you, then dives.
-* **Spitter** (green): backs away and spits a slow blob; dodge or jump it.
+* **Masks** (top left) are health; the three bars under them are **soul**. Every hit
+  you land fills soul (11); 33 soul buys one Focus heal or one Ember Bolt.
+* **Benches** (Up to sit) heal you, refill soul, set where you wake after dying, save
+  the game and bring every ordinary enemy back. Dying returns you to the last bench.
+* **Bosses** seal the doorways (they glow red) until the fight is over. Amber floor
+  marks show where bells will fall (they blink faster as it gets close). Golden
+  swinging bells can be pogoed.
 
-Everything respawns a few seconds after dying.
+The world, in the order it opens up:
 
-### Bosses
+| Area | Rooms | What it teaches |
+|---|---|---|
+| Ashen Descent | A1 The Landing, A2 Broken Ledges, A3 First Husk, A4 The Spike Pit | jumping, attacking, your first enemy, platforming over spikes (and pogo) |
+| Gutterglow Warrens | B1 the hub, B2 Husk Nest, B3 Wisp Shaft, B4 Matron's Den | a hub with four doors; the **Gutter Matron** gives you **Dash** |
+| Cistern of Bells | C1 Flooded Walk, C2 Shield Gallery, C3 Bell Shaft, C4 Grip Shrine | needs Dash; the shrine teaches **Wall Grip** |
+| Lantern Spire | D1 The Ascent, D2 Bell-Keeper's Rest, D3 The Gauntlet, D4 The Hollow Throne | needs Wall Grip (and both later); the **Bellwarden** |
 
-Two test arenas exist while the world is being built: `cargo play -- --room dev_matron`
-(the Gutter Matron) and `cargo play -- --room dev_bellwarden` (the Bellwarden). The
-boss wakes when you walk in; the doorways glow red until it is over.
-
-They use the same colour language as enemies: **flashing amber = an attack is coming,
-red = it is happening, blue = it is recovering, hit it now.** Amber floor marks show
-where bells will fall (blink faster as they near). Golden swinging bells can be
-pogoed. The bar at the top shows the boss's health with a notch at each phase change.
-
-Watch the bot fight (it plays with human-like reaction time):
-`cargo play -- --room dev_bellwarden --bot` (add `--boss-hp-pct 40` to start a
-fight late).
-
-## Development
+## For developers
 
 ```
-cargo test --workspace                 # simulation tests (headless, ~90 tests)
-cargo clippy --workspace --all-targets -- -D warnings
+cargo play                             # the game (release build)
+cargo test --workspace                 # ~200 tests, headless, a few seconds
+cargo clippy --workspace --all-targets --features hk_game/dev -- -D warnings
 cargo run -p hk_game --features dev    # faster rebuilds (dynamic linking; Linux/macOS)
 ```
 
-The simulation (`crates/hk_sim`) has no rendering dependency and runs at a fixed
-120 Hz; `crates/hk_game` only draws it. All feel numbers live in `assets/tuning/*.ron`.
+**Start options** (`cargo play -- ...`): `--room ID` and `--entry NAME` start in any room
+(developer start: nothing is saved; add `--all` to unlock every move; `sandbox`,
+`dev_matron` and `dev_bellwarden` are test rooms), `--new` ignores the save, `--bot`
+lets the boss-fight bot play, `--boss-hp-pct N` starts a boss fight late.
+
+**Feel numbers** live in `assets/tuning/*.ron` (jump height, dash speed, coyote time,
+boss attack timings, camera lead...). They are read at startup, so edit and restart:
+no rebuild. `cargo run -p hk_tools --bin dump_tuning -- assets/tuning --force`
+regenerates them from the code defaults.
+
+**Level design** is authored by `python3 tools/build_rooms.py` (rectangles and
+platforms instead of hand-typed ASCII) which writes `assets/rooms/*.room.ron`.
+`--show B1` prints a room's map.
+
+**Tools**
+
+| Command | What it does |
+|---|---|
+| `cargo run --release -p hk_tools --bin lint_rooms` | plays the map out on paper with the real controller: every room reachable in the intended order, every gate really gates, no softlocks. `-- --map C3:west --with dash` draws where you can stand |
+| `cargo run --release -p hk_tools --bin bench_sim` | simulation cost per tick (budget 100 us; it measures about 3 us) |
+| `python3 tools/gen_audio.py` | regenerates every sound and music loop (`--check` analyses without writing) |
+
+Headless screenshots (this is how the rendering was checked without a GPU):
+`xvfb-run cargo run -p hk_game --features dev -- --room B3 --entry west --shots room`
+writes `out/shot_room.png` (needs Mesa's software Vulkan). `--shots
+telegraph,glyph,pendulum` with `--bot` captures moments of a boss fight.
+
+### Layout
+
+```
+crates/hk_sim    the whole game, no rendering: 120 Hz fixed-step simulation
+crates/hk_game   the Bevy app: draws and hears the simulation, menus, HUD
+crates/hk_tools  lint_rooms, bench_sim, dump_tuning
+assets/          tuning/*.ron, rooms/*.room.ron, audio/ (generated)
+tools/           build_rooms.py, gen_audio.py
+docs/DESIGN.md   design notes, tuning rationale, playtest checklist
+```
+
+## Verification
+
+What has been checked by machine, and what has not:
+
+* **Controller and combat**: exact-tick tests (coyote 10 ticks works, 11 fails; jump apex
+  3.6 +/- 0.05; dash 4.1 +/- 0.1; hitstop, i-frames, pogo, soul) and replay-identical runs.
+* **Enemies and bosses**: state-machine tests for every attack, fairness lints on the data
+  (every tell >= 300-450 ms, every recovery >= 400 ms), and a **bot with human-like reaction
+  time** that fights both bosses to calibrate difficulty (the Matron falls to a clean run
+  most of the time; the Bellwarden is a real final boss).
+* **World**: `lint_rooms` and `tests/world.rs` prove all 16 rooms open up in three stages
+  (nothing, Dash, Dash + Wall Grip) with no softlocks, and that each gate needs its ability.
+* **Rendering** was checked with software-rendered screenshots; **audio** by analysis
+  (levels, clipping, loop seams), not by ears. There was no GPU and no speaker.
+* **Not verifiable here**: how it feels, whether the enemy placement is fun, whether
+  the boss fights are as hard as they should be for a human, perceived latency.

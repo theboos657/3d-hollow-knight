@@ -5,7 +5,7 @@
 //! later phases quickly).
 //!
 //! Moments: intro, telegraph, active, recover, transition, glyph, pendulum,
-//! dying; any other name just waits for the room to settle (`--shots room`).
+//! dying, end (the end card); any other name just waits for the room to settle (`--shots room`).
 //! Files land in `out/shot_<moment>.png` (`--shot-prefix P_` adds a prefix).
 
 use bevy::prelude::*;
@@ -85,6 +85,7 @@ fn take_shots(
     brains: Query<&BossBrain>,
     glyphs: Query<&Glyph>,
     pendulums: Query<&Pendulum>,
+    screen: Res<crate::menu::Screen>,
     mut exit: MessageWriter<AppExit>,
     mut frames: Local<u32>,
     mut last_shot: Local<u32>,
@@ -110,6 +111,7 @@ fn take_shots(
             "dying" => in_state(BossState::Dying, 60),
             "glyph" => glyphs.iter().any(|g| g.ticks < 50),
             "pendulum" => pendulums.iter().next().is_some(),
+            "end" => *screen == crate::menu::Screen::Ended,
             _ => *frames > 45,
         };
         if ready {

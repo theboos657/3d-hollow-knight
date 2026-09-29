@@ -28,6 +28,7 @@ impl Plugin for MenuPlugin {
         })
         .init_resource::<Menu>()
         .init_resource::<EndTimer>()
+        .add_systems(Startup, init_menu)
         .add_systems(
             Update,
             (
@@ -67,6 +68,8 @@ pub fn is_playing(screen: Res<Screen>) -> bool {
 #[derive(Resource, Default)]
 struct Menu {
     sel: usize,
+    /// A saved game exists (looked up once, at startup).
+    has_save: bool,
     /// Waiting for a key for this action.
     rebinding: Option<Action>,
     note: String,
@@ -92,6 +95,10 @@ enum Item {
     Bind(Action),
     ResetKeys,
     KeepExploring,
+}
+
+fn init_menu(dir: Res<SaveDir>, mut menu: ResMut<Menu>) {
+    menu.has_save = save_io::load(&dir.0).is_some();
 }
 
 fn action_name(a: Action) -> &'static str {
@@ -216,7 +223,7 @@ fn menu_input(
     mut settings: ResMut<Settings>,
     mut exit: MessageWriter<AppExit>,
 ) {
-    let has_save = *screen == Screen::Title && save_io::load(&save_dir.0).is_some();
+    let has_save = *screen == Screen::Title && menu.has_save;
 
     // --- waiting for a key to bind ---
     if let Some(action) = menu.rebinding {
@@ -253,7 +260,9 @@ fn menu_input(
     if list.is_empty() {
         return;
     }
-    menu.sel = menu.sel.min(list.len() - 1);
+    if menu.sel >= list.len() {
+        menu.sel = list.len() - 1;
+    }
     if nav.up {
         menu.sel = (menu.sel + list.len() - 1) % list.len();
         play_sfx(&mut commands, &sounds, &settings, "ui_move", 1.0);
@@ -454,7 +463,6 @@ fn menu_ui(
     menu: Res<Menu>,
     settings: Res<Settings>,
     stats: Res<RunStats>,
-    save_dir: Res<SaveDir>,
     old: Query<Entity, With<MenuRoot>>,
 ) {
     if !(screen.is_changed() || menu.is_changed() || settings.is_changed()) {
@@ -466,7 +474,7 @@ fn menu_ui(
     if *screen == Screen::Playing {
         return;
     }
-    let has_save = *screen == Screen::Title && save_io::load(&save_dir.0).is_some();
+    let has_save = *screen == Screen::Title && menu.has_save;
     let list = items(&screen, has_save);
 
     let (title, subtitle, dim): (&str, String, f32) = match &*screen {
@@ -593,6 +601,7 @@ mod tests {
             .insert_resource(screen)
             .init_resource::<Menu>()
             .init_resource::<EndTimer>()
+            .add_systems(Startup, init_menu)
             .add_systems(
                 Update,
                 (menu_input, pause_time, release_inputs, end_watch, menu_ui).chain(),
@@ -791,5 +800,22 @@ mod tests {
         assert_eq!(screen(&a), Screen::Ended);
         tap(&mut a, KeyCode::Enter); // "Keep exploring"
         assert_eq!(screen(&a), Screen::Playing);
+    }
+
+    #[test]
+    fn an_idle_menu_is_not_rebuilt_every_frame() {
+        let mut a = app(Screen::Paused, tmp_dir("idle"));
+        let ids = |a: &mut App| -> Vec<Entity> {
+            a.world_mut()
+                .query_filtered::<Entity, With<MenuRoot>>()
+                .iter(a.world())
+                .collect()
+        };
+        let before = ids(&mut a);
+        assert_eq!(before.len(), 1);
+        for _ in 0..10 {
+            a.update();
+        }
+        assert_eq!(ids(&mut a), before, "the same menu entity, untouched");
     }
 }

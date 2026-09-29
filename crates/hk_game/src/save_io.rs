@@ -80,3 +80,96 @@ fn autosave(
         write(&dir, &data);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::message::Messages;
+    use hk_sim::world::progress::SAVE_VERSION;
+    use hk_sim::SimPlugin;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("hk_save_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        d
+    }
+
+    fn app(dir: &Path) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(SimPlugin)
+            .add_plugins(SavePlugin {
+                enabled: true,
+                dir: dir.to_path_buf(),
+            });
+        app.world_mut()
+            .resource_mut::<hk_sim::world::progress::Checkpoint>()
+            .room = "B3".into();
+        app.update();
+        app
+    }
+
+    #[test]
+    fn a_bench_rest_writes_a_save_that_loads_back() {
+        let dir = tmp("bench");
+        let mut a = app(&dir);
+        assert!(load(&dir).is_none(), "nothing saved yet");
+        a.world_mut()
+            .resource_mut::<Messages<BenchRested>>()
+            .write(BenchRested);
+        a.update();
+        let s = load(&dir).expect("autosave wrote a file");
+        assert_eq!(s.version, SAVE_VERSION);
+        assert_eq!(s.room, "B3");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn learning_an_ability_and_beating_a_boss_also_save() {
+        for which in 0..2 {
+            let dir = tmp(&format!("other{which}"));
+            let mut a = app(&dir);
+            if which == 0 {
+                a.world_mut()
+                    .resource_mut::<Messages<AbilityGained>>()
+                    .write(AbilityGained {
+                        ability: hk_sim::world::room::Ability::Dash,
+                    });
+            } else {
+                a.world_mut()
+                    .resource_mut::<Messages<BossDefeated>>()
+                    .write(BossDefeated {
+                        id: "matron".into(),
+                        tag: Some(7),
+                    });
+            }
+            a.update();
+            assert!(load(&dir).is_some(), "event {which} did not save");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn nothing_happening_writes_nothing() {
+        let dir = tmp("quiet");
+        let mut a = app(&dir);
+        for _ in 0..5 {
+            a.update();
+        }
+        assert!(!dir.join(FILE).exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_corrupt_save_is_ignored_not_fatal() {
+        let dir = tmp("corrupt");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FILE), "(this is not a save").unwrap();
+        assert!(load(&dir).is_none());
+        // ...and a real save can replace it, leaving no temp file behind.
+        write(&dir, &SaveData::default());
+        assert!(load(&dir).is_some());
+        assert!(!dir.join(format!("{FILE}.tmp")).exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

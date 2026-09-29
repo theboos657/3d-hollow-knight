@@ -11,6 +11,7 @@ workspace = true
 
 [dependencies]
 hk_sim = { path = "../hk_sim" }
+bevy_ecs = "0.18"
 bevy_math = "0.18"
 ron = "0.12.2"
 serde = "1.0.229"
