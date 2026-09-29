@@ -1,5 +1,5 @@
 //! Juice: particles for hits, blocks, deaths, landings and dashes, plus
-//! squash-and-stretch on the player. Purely visual: nothing here feeds back
+//! Purely visual: nothing here feeds back
 //! into the simulation.
 
 use bevy::prelude::*;
@@ -17,7 +17,7 @@ impl Plugin for VfxPlugin {
             .add_systems(Startup, setup_assets)
             .add_systems(
                 Update,
-                (spawn_hit_vfx, dust_and_trails, squash, animate_particles).after(RenderPrepSet),
+                (spawn_hit_vfx, dust_and_trails, animate_particles).after(RenderPrepSet),
             );
     }
 }
@@ -292,31 +292,4 @@ fn animate_particles(
         t.translation += p.vel * dt;
         t.scale = Vec3::splat(p.size * (p.life / p.max));
     }
-}
-
-/// Stretch while moving vertically, squash on landing; feet stay planted.
-fn squash(
-    time: Res<Time>,
-    mut timer: Local<f32>,
-    mut prev: Local<(bool, f32)>,
-    mut q: Query<(&mut Transform, &Motor, &Velocity, &Aabb), With<Player>>,
-) {
-    let Ok((mut t, motor, vel, aabb)) = q.single_mut() else {
-        return;
-    };
-    if motor.grounded && !prev.0 && prev.1 < -4.0 {
-        *timer = 0.12;
-    }
-    *prev = (motor.grounded, vel.y);
-
-    let s = (vel.y.abs() / 40.0).min(0.2);
-    let (mut sx, mut sy) = (1.0 - s * 0.5, 1.0 + s);
-    if *timer > 0.0 {
-        let k = *timer / 0.12;
-        sx = 1.0 + 0.25 * k;
-        sy = 1.0 - 0.25 * k;
-        *timer = (*timer - time.delta_secs()).max(0.0);
-    }
-    t.scale = Vec3::new(sx, sy, 1.0);
-    t.translation.y -= aabb.half.y * (1.0 - sy);
 }

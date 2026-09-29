@@ -17,11 +17,14 @@ mod devices;
 mod hud;
 mod interp;
 mod menu;
+mod models;
+mod rig;
 mod save_io;
 mod scene;
 mod settings;
 mod toast;
 mod vfx;
+mod viewer;
 mod visuals;
 mod world_view;
 
@@ -45,14 +48,16 @@ fn main() {
         .map(|v| v.split(',').map(str::to_owned).collect())
         .unwrap_or_default();
     let boss_hp_pct = value_of("--boss-hp-pct").and_then(|v| v.parse::<f32>().ok());
+    let viewer = args.iter().any(|a| a == "--viewer");
     let dev_room = value_of("--room");
     let assets_dir = assets::find_assets_dir();
     let save_dir = save_io::save_dir(&assets_dir);
     // A developer start (--room) never touches the save; otherwise continue
     // the saved game unless --new asks for a fresh one.
     // Scripted runs (smoke test, bot demo, screenshots) never read or write a save.
-    let scripted = smoke || bot || !shots.is_empty();
+    let scripted = smoke || bot || !shots.is_empty() || viewer;
     let start = match dev_room {
+        _ if viewer => world_view::StartMode::Viewer,
         Some(room) => world_view::StartMode::Dev {
             room,
             entry: value_of("--entry").unwrap_or_else(|| "start".into()),
@@ -125,7 +130,7 @@ fn main() {
         world_view::WorldViewPlugin,
         visuals::VisualsPlugin,
         camera_rig::CameraRigPlugin,
-        vfx::VfxPlugin,
+        (vfx::VfxPlugin, models::knight::KnightPlugin),
         boss_view::BossViewPlugin,
         toast::ToastPlugin,
         hud::HudPlugin,
@@ -148,6 +153,12 @@ fn main() {
     ));
 
     // A smoke run is scripted (see debug.rs); real devices would fight it.
+    if viewer {
+        app.add_plugins(viewer::ViewerPlugin);
+    }
+    if args.iter().any(|a| a == "--show-hitboxes") {
+        app.insert_resource(visuals::ShowHitboxes(true));
+    }
     if !smoke && !bot {
         app.add_plugins(devices::DevicePlugin);
     }

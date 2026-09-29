@@ -6,31 +6,35 @@ use hk_sim::boss::{Boss, Pendulum};
 use hk_sim::combat::*;
 use hk_sim::components::{Aabb, SimPos};
 use hk_sim::enemy::{Brain, EnemyKind, EnemyState};
-use hk_sim::player::{Facing, Player, PlayerState};
+use hk_sim::player::Player;
 use hk_sim::world::room::{CurrentRoom, RoomEntered, RoomLibrary};
 use hk_sim::SimTick;
 
 use crate::interp::{Interpolated, RenderPrepSet};
 use crate::scene::Palette;
 
+/// `--show-hitboxes`: also draw the player's nail hitbox (a debugging aid; the
+/// sword and its trail are what the player sees).
+#[derive(Resource, Default)]
+pub struct ShowHitboxes(pub bool);
+
 pub struct VisualsPlugin;
 
 impl Plugin for VisualsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, spawn_hud).add_systems(
-            Update,
-            (
-                attach_body_visuals,
-                attach_hit_visuals,
-                attach_player_extras,
-                update_nose,
-                player_fx,
-                enemy_fx,
-                update_shield_plates,
-                room_banner,
-            )
-                .after(RenderPrepSet),
-        );
+        app.init_resource::<ShowHitboxes>()
+            .add_systems(PostStartup, spawn_hud)
+            .add_systems(
+                Update,
+                (
+                    attach_body_visuals,
+                    attach_hit_visuals,
+                    enemy_fx,
+                    update_shield_plates,
+                    room_banner,
+                )
+                    .after(RenderPrepSet),
+            );
     }
 }
 
@@ -64,7 +68,12 @@ fn attach_body_visuals(
             Option<&Brain>,
             Has<Guard>,
         ),
-        (Added<Hurtbox>, Without<Boss>, Without<Pendulum>),
+        (
+            Added<Hurtbox>,
+            Without<Boss>,
+            Without<Pendulum>,
+            Without<Player>,
+        ),
     >,
 ) {
     for (e, hu, aabb, pos, brain, guard) in &q {
@@ -82,7 +91,7 @@ fn attach_body_visuals(
             (mesh, m)
         } else {
             let mat = match hu.team {
-                Team::Player => &pal.player,
+                Team::Player => &pal.marker,
                 Team::Enemy => &pal.enemy,
                 Team::Hazard => &pal.hazard,
             };
@@ -101,11 +110,17 @@ fn attach_body_visuals(
             },
         ));
         if guard {
+            let plate = mats.add(StandardMaterial {
+                base_color: Color::srgb(0.75, 0.80, 0.85),
+                metallic: 0.6,
+                perceptual_roughness: 0.35,
+                ..default()
+            });
             commands.entity(e).with_children(|p| {
                 p.spawn((
                     ShieldPlate,
                     Mesh3d(meshes.add(Cuboid::new(0.18, half.y * 1.7, 1.1))),
-                    MeshMaterial3d(pal.player.clone()),
+                    MeshMaterial3d(plate.clone()),
                     Transform::from_xyz(half.x + 0.1, 0.0, 0.1),
                 ));
             });
@@ -156,9 +171,13 @@ fn attach_hit_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     pal: Res<Palette>,
+    show: Res<ShowHitboxes>,
     q: Query<(Entity, &Hitbox, &SimPos), (Added<Hitbox>, Without<Hurtbox>)>,
 ) {
     for (e, hb, pos) in &q {
+        if hb.team == Team::Player && hb.kind == HitKind::Nail && !show.0 {
+            continue;
+        }
         let mat = match hb.kind {
             HitKind::Spell => &pal.bolt,
             HitKind::Projectile => &pal.hazard,
@@ -174,83 +193,6 @@ fn attach_hit_visuals(
             },
         ));
     }
-}
-
-#[derive(Component)]
-struct Nose;
-
-/// Lantern light and a "nose" block that shows which way the player faces.
-fn attach_player_extras(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    pal: Res<Palette>,
-    q: Query<Entity, Added<Player>>,
-) {
-    for e in &q {
-        // Transform + Visibility first, so the children below never see a
-        // parent that lacks them (Bevy warns B0004 about that).
-        commands
-            .entity(e)
-            .insert((Transform::default(), Visibility::default()));
-        commands.entity(e).with_children(|p| {
-            p.spawn((
-                PointLight {
-                    intensity: 900_000.0,
-                    range: 24.0,
-                    color: Color::srgb(1.0, 0.85, 0.6),
-                    shadows_enabled: false,
-                    ..default()
-                },
-                Transform::from_xyz(0.0, 0.6, 2.5),
-            ));
-            p.spawn((
-                Nose,
-                Mesh3d(meshes.add(Cuboid::new(0.3, 0.2, 0.5))),
-                MeshMaterial3d(pal.marker.clone()),
-                Transform::from_xyz(0.32, 0.35, 0.5),
-            ));
-        });
-    }
-}
-
-fn update_nose(
-    player: Query<(&Facing, &Children), With<Player>>,
-    mut nose: Query<&mut Transform, With<Nose>>,
-) {
-    for (facing, children) in &player {
-        for c in children.iter() {
-            if let Ok(mut t) = nose.get_mut(c) {
-                t.translation.x = 0.32 * facing.0 as f32;
-            }
-        }
-    }
-}
-
-/// State colouring and i-frame flicker for the player.
-fn player_fx(
-    tick: Res<SimTick>,
-    pal: Res<Palette>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    mut q: Query<(&PlayerState, Has<Invulnerable>, &mut Visibility), With<Player>>,
-) {
-    let Ok((state, invuln, mut vis)) = q.single_mut() else {
-        return;
-    };
-    if let Some(m) = mats.get_mut(&pal.player) {
-        m.emissive = match state {
-            PlayerState::Focus => LinearRgba::rgb(0.2, 1.4, 0.5),
-            PlayerState::Dash => LinearRgba::rgb(0.6, 1.8, 3.0),
-            PlayerState::Hurt => LinearRgba::rgb(2.5, 0.2, 0.2),
-            PlayerState::WallSlide => LinearRgba::rgb(1.4, 1.1, 0.2),
-            PlayerState::Dead => LinearRgba::rgb(0.0, 0.0, 0.0),
-            _ => LinearRgba::rgb(0.1, 0.1, 0.16),
-        };
-    }
-    *vis = if invuln && (tick.0 / 6) & 1 == 0 {
-        Visibility::Hidden
-    } else {
-        Visibility::Inherited
-    };
 }
 
 // -------------------------------------------------------------------- HUD --

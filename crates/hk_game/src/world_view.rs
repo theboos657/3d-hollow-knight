@@ -23,6 +23,8 @@ pub enum StartMode {
     Continue(SaveData),
     /// A fresh game in the first room, with no abilities.
     New,
+    /// `--viewer`: no game at all, just the model stage (see viewer.rs).
+    Viewer,
     /// Developer start (`--room ID`): straight into a room. The sandbox (and
     /// `--all`) unlock every move; nothing is saved.
     Dev {
@@ -146,6 +148,7 @@ pub fn begin_game(world: &mut World, mode: StartMode) {
             }
         }
         StartMode::New => begin(world, FIRST_ROOM.0, FIRST_ROOM.1, Abilities::default()),
+        StartMode::Viewer => {}
         StartMode::Dev { room, entry, all } => {
             let sandbox = world
                 .resource::<RoomLibrary>()
