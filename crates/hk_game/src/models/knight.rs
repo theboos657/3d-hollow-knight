@@ -16,7 +16,11 @@ use hk_sim::player::{Facing, Motor, Player, PlayerState};
 use hk_sim::tuning::Tuning;
 use hk_sim::SimTick;
 
-use crate::rig::meshkit::{blade, cone, crescent, ellipsoid, lathe, limb, ribbon, tube, MeshData};
+use super::enemies::skin_material;
+use crate::look::pbr::{Kind, Materials, EMISSIVE_FLOOR};
+use crate::rig::meshkit::{
+    blade, cone, crescent, ellipsoid, lathe, limb, ribbon, ring, tube, MeshData,
+};
 use crate::rig::pose::{
     angle_diff, deg, knight_joint as kj, knight_pose, lerp, run_cycle_rate, step_cape,
     swing_arc_deg, swing_pose, KnightIn, SwingDir, SwingTiming,
@@ -121,57 +125,123 @@ pub struct KnightMeshes {
 }
 
 pub fn knight_meshes() -> KnightMeshes {
-    // Cloak: a hooded bell of cloth, flared at the hem, with a ragged edge and
-    // a darker base. Local to the BODY joint (hip at the origin).
-    let cloak = lathe(
-        &[
-            (0.34, -0.36),
-            (0.36, -0.33),
-            (0.31, -0.20),
-            (0.24, -0.02),
-            (0.20, 0.20),
-            (0.22, 0.34),
-            (0.14, 0.42),
-            (0.0, 0.44),
-        ],
-        20,
-    )
-    .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.86)))
-    .jitter(11, 0.012)
-    .recolor(|p| {
-        let k = ((p.y + 0.36) / 0.8).clamp(0.0, 1.0);
-        let shade = 0.45 + 0.55 * k;
-        [shade, shade, shade * 1.05, 1.0]
-    });
+    // Cloak: a hooded bell of woven cloth, flared at the hem, with deep folds
+    // and a ragged edge and a darker base. Local to the BODY joint (hip at the
+    // origin).
+    let cloak_profile: Vec<(f32, f32)> = [
+        (0.34, -0.36),
+        (0.36, -0.33),
+        (0.31, -0.20),
+        (0.24, -0.02),
+        (0.20, 0.20),
+        (0.22, 0.34),
+        (0.14, 0.42),
+        (0.0, 0.44),
+    ]
+    .to_vec();
+    let smooth_profile: Vec<(f32, f32)> = (0..=28)
+        .map(|k| {
+            let y = -0.36 + 0.80 * k as f32 / 28.0;
+            let r = cloak_profile
+                .windows(2)
+                .find(|w| y >= w[0].1 && y <= w[1].1)
+                .map_or(0.0, |w| {
+                    let f = (y - w[0].1) / (w[1].1 - w[0].1).max(1e-6);
+                    w[0].0 + (w[1].0 - w[0].0) * f
+                });
+            (r, y)
+        })
+        .collect();
+    let cloak = lathe(&smooth_profile, 56)
+        .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.86)))
+        // Folds: deeper toward the hem, gathering at the shoulders.
+        .displaced(0.030, |p| {
+            let hang = ((0.30 - p.y) / 0.6).clamp(0.0, 1.0);
+            (p.z.atan2(p.x) * 9.0 + p.y * 1.6).sin() * hang
+        })
+        .sculpted(11, 0.006, 6.0, 2)
+        // A ragged, uneven hem.
+        .warped(|p| {
+            let lower = ((-0.25 - p.y) / 0.11).clamp(0.0, 1.0);
+            let a = p.z.atan2(p.x);
+            let tatter = (a * 11.0).sin() * 0.5 + (a * 5.0 + 1.3).sin() * 0.5;
+            Vec3::new(p.x, p.y + lower * 0.045 * (tatter - 0.3), p.z)
+        })
+        .uv_scaled(3.0, 2.0)
+        .recolor(|p| {
+            let k = ((p.y + 0.36) / 0.8).clamp(0.0, 1.0);
+            let shade = 0.45 + 0.55 * k;
+            [shade, shade, shade * 1.05, 1.0]
+        });
 
-    // Helm: an inverted bell, widest at the rim, with two swept-back horns.
-    // Local to the HEAD joint (neck at the origin).
-    let mut helm = lathe(
-        &[
-            (0.30, 0.0),
-            (0.36, 0.06),
-            (0.36, 0.22),
-            (0.31, 0.38),
-            (0.21, 0.52),
-            (0.08, 0.60),
-            (0.0, 0.62),
-        ],
-        24,
-    )
-    .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.92)));
-    for side in [-1.0f32, 1.0] {
-        let horn = tube(
-            &[
-                Vec3::new(0.02, 0.50, 0.11 * side),
-                Vec3::new(-0.06, 0.64, 0.17 * side),
-                Vec3::new(-0.20, 0.76, 0.20 * side),
-                Vec3::new(-0.32, 0.79, 0.19 * side),
-            ],
-            |t| 0.038 * (1.0 - t * 0.85),
-            8,
+    // Helm: a lacquered inverted bell, widest at the rim, with a banded rim, a
+    // crest ridge and two swept-back, ribbed horns. Local to the HEAD joint
+    // (neck at the origin).
+    let helm_profile: Vec<(f32, f32)> = (0..=24)
+        .map(|k| {
+            let y = 0.62 * k as f32 / 24.0;
+            let pts = [
+                (0.30, 0.0),
+                (0.36, 0.06),
+                (0.36, 0.22),
+                (0.31, 0.38),
+                (0.21, 0.52),
+                (0.08, 0.60),
+                (0.0, 0.62),
+            ];
+            let r = pts
+                .windows(2)
+                .find(|w| y >= w[0].1 && y <= w[1].1)
+                .map_or(0.0, |w| {
+                    let f = (y - w[0].1) / (w[1].1 - w[0].1).max(1e-6);
+                    w[0].0 + (w[1].0 - w[0].0) * f
+                });
+            (r, y)
+        })
+        .collect();
+    let mut helm = lathe(&helm_profile, 56)
+        .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.92)))
+        .sculpted(13, 0.008, 5.0, 2);
+    // The rim band, and studs round it.
+    helm.merge(
+        &ring(0.335, 0.022, 48, 8)
+            .transformed(Mat4::from_scale(Vec3::new(1.0, 1.0, 0.92)))
+            .transformed(Mat4::from_translation(Vec3::new(0.0, 0.03, 0.0))),
+    );
+    for i in 0..14 {
+        let a = std::f32::consts::TAU * i as f32 / 14.0;
+        helm.merge(
+            &ellipsoid(0.014, 0.014, 0.014, 4, 8).transformed(Mat4::from_translation(Vec3::new(
+                0.365 * a.cos(),
+                0.13,
+                0.365 * 0.92 * a.sin(),
+            ))),
         );
-        helm.merge(&horn);
     }
+    // A crest ridge from brow to nape over the crown.
+    helm.merge(&tube(
+        &[
+            Vec3::new(0.30, 0.40, 0.0),
+            Vec3::new(0.22, 0.55, 0.0),
+            Vec3::new(0.02, 0.64, 0.0),
+            Vec3::new(-0.20, 0.55, 0.0),
+            Vec3::new(-0.30, 0.38, 0.0),
+        ],
+        |t| 0.020 * (1.0 + 0.5 * (t * std::f32::consts::PI).sin()),
+        7,
+    ));
+    for side in [-1.0f32, 1.0] {
+        helm.merge(&super::geo::thorn(
+            Vec3::new(0.02, 0.50, 0.11 * side),
+            Vec3::new(-0.20, 1.0, 0.65 * side),
+            Vec3::new(-1.0, -0.25, 0.0),
+            0.44,
+            0.040,
+            0.10,
+            9,
+        ));
+    }
+    let helm = helm.uv_scaled(3.0, 1.5);
     // The dark visor and the two small eyes.
     let visor = ellipsoid(0.06, 0.13, 0.20, 8, 12)
         .transformed(Mat4::from_translation(Vec3::new(0.30, 0.26, 0.0)));
@@ -220,42 +290,62 @@ pub fn knight_meshes() -> KnightMeshes {
 pub fn build_assets(
     meshes: &mut Assets<Mesh>,
     mats: &mut Assets<StandardMaterial>,
+    pbr: &Materials,
 ) -> KnightAssets {
     let m = knight_meshes();
     let none = LinearRgba::BLACK;
+    let c = Color::srgb;
+    // Emissive colours multiply the glow map (never below EMISSIVE_FLOOR), so
+    // the little self-light the knight had is scaled up to match.
+    let lift = 1.0 / EMISSIVE_FLOOR;
+    let skin = |kind, tint, rough, coat, emissive: LinearRgba| StandardMaterial {
+        emissive: emissive * lift,
+        ..skin_material(pbr, kind, tint, rough, coat)
+    };
     let mats = KnightMats {
-        bone: mats.add(mat(
-            Color::srgb(0.93, 0.92, 0.85),
-            0.5,
-            0.0,
+        bone: mats.add(skin(
+            Kind::Bone,
+            c(1.0, 0.98, 0.92),
+            0.75,
+            0.4,
             LinearRgba::rgb(0.05, 0.05, 0.05),
         )),
-        cloak: mats.add(mat(
-            Color::srgb(0.20, 0.18, 0.42),
-            0.9,
+        cloak: mats.add(skin(
+            Kind::Cloth,
+            c(0.36, 0.33, 0.85),
+            1.0,
             0.0,
             LinearRgba::rgb(0.01, 0.01, 0.04),
         )),
         cape: mats.add(StandardMaterial {
             cull_mode: None,
-            ..mat(
-                Color::srgb(0.70, 0.10, 0.16),
-                0.85,
+            double_sided: true,
+            ..skin(
+                Kind::Cloth,
+                Color::linear_rgb(1.25, 0.03, 0.05),
+                1.0,
                 0.0,
                 LinearRgba::rgb(0.12, 0.01, 0.02),
             )
         }),
-        dark: mats.add(mat(Color::srgb(0.06, 0.06, 0.10), 0.6, 0.0, none)),
+        dark: mats.add(skin(
+            Kind::Leather,
+            c(0.38, 0.38, 0.55),
+            0.9,
+            0.0,
+            LinearRgba::BLACK,
+        )),
         eye: mats.add(mat(
             Color::srgb(0.05, 0.05, 0.05),
             0.4,
             0.0,
             LinearRgba::rgb(3.2, 2.6, 0.9),
         )),
-        steel: mats.add(mat(
-            Color::srgb(0.84, 0.88, 0.95),
-            0.28,
-            0.75,
+        steel: mats.add(skin(
+            Kind::Steel,
+            c(0.92, 0.96, 1.0),
+            1.0,
+            0.25,
             LinearRgba::rgb(0.02, 0.03, 0.05),
         )),
         edge: mats.add(mat(
@@ -278,7 +368,8 @@ pub fn build_assets(
             ..default()
         }),
     };
-    let mut add = |d: MeshData| meshes.add(d.to_mesh());
+    let _ = none;
+    let mut add = |d: MeshData| meshes.add(d.to_mesh_pbr());
 
     let cape_seg = |len: f32, w0: f32, w1: f32| {
         ribbon(
@@ -308,26 +399,64 @@ pub fn build_assets(
         helm: add(m.helm),
         visor: add(m.visor),
         eyes: add(m.eyes),
-        arm: add(limb(Vec3::ZERO, Vec3::new(0.26, 0.0, 0.0), 0.055, 0.045, 8)),
-        hand: add(ellipsoid(0.06, 0.06, 0.06, 6, 10)
+        arm: add(limb(Vec3::ZERO, Vec3::new(0.26, 0.0, 0.0), 0.055, 0.045, 12).uv_scaled(2.0, 1.0)),
+        hand: add(ellipsoid(0.06, 0.06, 0.06, 8, 14)
             .transformed(Mat4::from_translation(Vec3::new(0.28, 0.0, 0.0)))),
-        grip: add(limb(
-            Vec3::new(0.30, 0.0, 0.0),
-            Vec3::new(0.48, 0.0, 0.0),
-            0.028,
-            0.028,
-            8,
-        )),
-        guard: add(ellipsoid(0.03, 0.17, 0.06, 6, 10)
-            .transformed(Mat4::from_translation(Vec3::new(0.5, 0.0, 0.0)))),
+        grip: add({
+            // The grip, bound in cord.
+            let mut g = limb(
+                Vec3::new(0.30, 0.0, 0.0),
+                Vec3::new(0.48, 0.0, 0.0),
+                0.026,
+                0.026,
+                10,
+            );
+            for k in 0..7 {
+                let x = 0.315 + 0.024 * k as f32;
+                g.merge(
+                    &ring(0.028, 0.007, 12, 5)
+                        .transformed(Mat4::from_rotation_z(-std::f32::consts::FRAC_PI_2))
+                        .transformed(Mat4::from_translation(Vec3::new(x, 0.0, 0.0))),
+                );
+            }
+            g.uv_scaled(2.0, 1.0)
+        }),
+        guard: add({
+            // A curved cross-guard with ball ends, its tips swept toward the blade.
+            let mut g = tube(
+                &[
+                    Vec3::new(0.47, -0.19, 0.0),
+                    Vec3::new(0.51, -0.09, 0.0),
+                    Vec3::new(0.53, 0.0, 0.0),
+                    Vec3::new(0.51, 0.09, 0.0),
+                    Vec3::new(0.47, 0.19, 0.0),
+                ],
+                |t| 0.026 * (1.0 + 0.3 * (t * std::f32::consts::PI).sin()),
+                9,
+            );
+            for y in [-0.195f32, 0.195] {
+                g.merge(
+                    &ellipsoid(0.04, 0.04, 0.04, 6, 10)
+                        .transformed(Mat4::from_translation(Vec3::new(0.465, y, 0.0))),
+                );
+            }
+            g
+        }),
         pommel: add(ellipsoid(0.045, 0.045, 0.045, 6, 10)
             .transformed(Mat4::from_translation(Vec3::new(0.24, 0.0, 0.0)))),
         blade: add(m.blade),
         edge: add(m.edge),
-        off_arm: add(limb(Vec3::ZERO, Vec3::new(0.30, 0.0, 0.0), 0.05, 0.04, 8)),
-        leg: add(limb(Vec3::ZERO, Vec3::new(0.0, -0.34, 0.0), 0.07, 0.055, 8)),
-        boot: add(ellipsoid(0.11, 0.06, 0.075, 6, 10)
-            .transformed(Mat4::from_translation(Vec3::new(0.03, -0.38, 0.0)))),
+        off_arm: add(
+            limb(Vec3::ZERO, Vec3::new(0.30, 0.0, 0.0), 0.05, 0.04, 12).uv_scaled(2.0, 1.0)
+        ),
+        leg: add(
+            limb(Vec3::ZERO, Vec3::new(0.0, -0.34, 0.0), 0.07, 0.055, 12)
+                .sculpted(17, 0.004, 8.0, 2)
+                .uv_scaled(2.0, 2.0),
+        ),
+        boot: add(ellipsoid(0.11, 0.06, 0.075, 8, 14)
+            .transformed(Mat4::from_translation(Vec3::new(0.03, -0.38, 0.0)))
+            .sculpted(19, 0.004, 9.0, 2)),
         cape: [
             add(cape_seg(0.28, 0.32, 0.29)),
             add(cape_seg(0.26, 0.29, 0.24)),
@@ -649,8 +778,9 @@ pub fn build_knight_assets(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    pbr: Res<Materials>,
 ) {
-    let a = build_assets(&mut meshes, &mut mats);
+    let a = build_assets(&mut meshes, &mut mats, &pbr);
     commands.insert_resource(a);
 }
 
@@ -935,13 +1065,13 @@ pub fn apply(
     let glow = (pose.glow + out.flash * 1.5).min(2.5);
     if (anim.last_glow - glow).abs() > 0.01 {
         if let Some(m) = mats.get_mut(&assets.mats.edge) {
-            m.emissive = LinearRgba::rgb(1.3, 2.0, 3.0) * (0.25 + 1.6 * glow);
+            m.emissive = LinearRgba::rgb(1.3, 2.0, 3.0) * (0.10 + 1.4 * glow);
         }
         anim.last_glow = glow;
     }
     if anim.last_tint != out.state_tint {
         if let Some(m) = mats.get_mut(&assets.mats.bone) {
-            m.emissive = out.state_tint;
+            m.emissive = out.state_tint * (1.0 / EMISSIVE_FLOOR);
         }
         anim.last_tint = out.state_tint;
     }

@@ -133,19 +133,35 @@ impl MeshData {
         self
     }
 
-    /// Pushes every vertex along its normal by hash noise in `[-amp, amp]`.
-    /// The noise depends only on position, so seams stay closed.
-    pub fn jitter(mut self, seed: u32, amp: f32) -> MeshData {
-        for (p, n) in self.pos.iter_mut().zip(&self.nrm) {
-            let q = Vec3::from(*p);
-            let h = hash3(
-                seed,
-                (q.x * 64.0).round() as i32,
-                (q.y * 64.0).round() as i32,
-                (q.z * 64.0).round() as i32,
-            );
-            let d = (h * 2.0 - 1.0) * amp;
-            *p = (q + Vec3::from(*n) * d).to_array();
+    /// Moves every vertex by `f` (positions only: use it for small changes,
+    /// like a ragged hem, where the normals stay good enough).
+    pub fn warped(mut self, f: impl Fn(Vec3) -> Vec3) -> MeshData {
+        for p in &mut self.pos {
+            *p = f(Vec3::from(*p)).to_array();
+        }
+        self
+    }
+
+    /// Pushes every vertex along its normal by `amp * field(position)` (the
+    /// field is in about `[-1, 1]`) and bends the normals to match: folds,
+    /// ribs and dents of any shape.
+    pub fn displaced(self, amp: f32, field: impl Fn(Vec3) -> f32) -> MeshData {
+        self.displaced_with(amp, 0.004, field)
+    }
+
+    /// [`displaced`](Self::displaced) with the step `e` used to measure the
+    /// field's slope (much finer than its features).
+    pub fn displaced_with(mut self, amp: f32, e: f32, field: impl Fn(Vec3) -> f32) -> MeshData {
+        for (p, n) in self.pos.iter_mut().zip(self.nrm.iter_mut()) {
+            let (q, nv) = (Vec3::from(*p), Vec3::from(*n));
+            let grad = Vec3::new(
+                field(q + Vec3::X * e) - field(q - Vec3::X * e),
+                field(q + Vec3::Y * e) - field(q - Vec3::Y * e),
+                field(q + Vec3::Z * e) - field(q - Vec3::Z * e),
+            ) / (2.0 * e);
+            let tangential = grad - nv * grad.dot(nv);
+            *p = (q + nv * amp * field(q)).to_array();
+            *n = (nv - tangential * amp).normalize_or_zero().to_array();
         }
         self
     }
@@ -164,21 +180,10 @@ impl MeshData {
     /// of its *position* (`amp` is the peak displacement, `freq` the number of
     /// features per unit, so seams stay closed), and the normals are bent to
     /// match, so the lumps catch the light instead of just moving.
-    pub fn sculpted(mut self, seed: u32, amp: f32, freq: f32, octaves: u32) -> MeshData {
-        let field = |q: Vec3| (fbm3(seed, q * freq, octaves) - 0.5) * 2.0;
-        let e = 0.01 / freq.max(1.0);
-        for (p, n) in self.pos.iter_mut().zip(self.nrm.iter_mut()) {
-            let (q, nv) = (Vec3::from(*p), Vec3::from(*n));
-            let grad = Vec3::new(
-                field(q + Vec3::X * e) - field(q - Vec3::X * e),
-                field(q + Vec3::Y * e) - field(q - Vec3::Y * e),
-                field(q + Vec3::Z * e) - field(q - Vec3::Z * e),
-            ) / (2.0 * e);
-            let tangential = grad - nv * grad.dot(nv);
-            *p = (q + nv * amp * field(q)).to_array();
-            *n = (nv - tangential * amp).normalize_or_zero().to_array();
-        }
-        self
+    pub fn sculpted(self, seed: u32, amp: f32, freq: f32, octaves: u32) -> MeshData {
+        self.displaced_with(amp, 0.01 / freq.max(1.0), move |q| {
+            (fbm3(seed, q * freq, octaves) - 0.5) * 2.0
+        })
     }
 
     #[cfg(test)]
@@ -868,6 +873,41 @@ mod tests {
     }
 
     #[test]
+    fn displacement_folds_a_surface_and_warping_moves_vertices() {
+        let cyl = lathe(&[(0.5, 0.0), (0.5, 1.0)], 24);
+        // Eight vertical folds around the axis.
+        let folded = cyl
+            .clone()
+            .displaced(0.04, |p| (p.z.atan2(p.x) * 8.0).sin());
+        ok("folded", &folded);
+        let radii: Vec<f32> = folded
+            .pos
+            .iter()
+            .map(|p| Vec2::new(p[0], p[2]).length())
+            .collect();
+        let (lo, hi) = radii
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), r| (a.min(*r), b.max(*r)));
+        assert!(hi - lo > 0.05, "folds have depth: {lo}..{hi}");
+        assert!(hi <= 0.5 + 0.04 + 1e-4 && lo >= 0.5 - 0.04 - 1e-4);
+        // Bent normals lean off the radial direction on the fold flanks.
+        let leaning = folded
+            .pos
+            .iter()
+            .zip(&folded.nrm)
+            .filter(|(p, n)| {
+                let radial = Vec3::new(p[0], 0.0, p[2]).normalize();
+                Vec3::from(**n).dot(radial) < 0.995
+            })
+            .count();
+        assert!(leaning > folded.pos.len() / 4, "normals follow the folds");
+        // Warping shifts only positions.
+        let shifted = cyl.clone().warped(|p| p + Vec3::Y);
+        assert_eq!(shifted.nrm, cyl.nrm);
+        assert!((shifted.pos[0][1] - cyl.pos[0][1] - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
     fn noise3_is_smooth_bounded_and_varied() {
         let mut lo = 1.0f32;
         let mut hi = 0.0f32;
@@ -967,19 +1007,6 @@ mod tests {
         assert_eq!(a.vertex_count(), va * 2);
         assert_eq!(a.triangle_count(), ta * 2);
         ok("merged", &a);
-    }
-
-    #[test]
-    fn jitter_is_deterministic_and_bounded() {
-        let base = ellipsoid(0.5, 0.5, 0.5, 8, 12);
-        let a = base.clone().jitter(7, 0.05);
-        let b = base.clone().jitter(7, 0.05);
-        let c = base.clone().jitter(8, 0.05);
-        assert_eq!(a.pos, b.pos);
-        assert_ne!(a.pos, c.pos);
-        for (p, q) in a.pos.iter().zip(&base.pos) {
-            assert!((Vec3::from(*p) - Vec3::from(*q)).length() <= 0.0501);
-        }
     }
 
     #[test]
