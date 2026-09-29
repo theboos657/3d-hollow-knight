@@ -11,7 +11,6 @@ pub mod props;
 pub mod quality;
 pub mod room;
 pub mod style;
-pub mod texture;
 pub mod vignette;
 
 use bevy::prelude::*;

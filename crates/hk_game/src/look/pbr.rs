@@ -516,19 +516,19 @@ pub fn texel(kind: Kind, u: f32, v: f32) -> Texel {
         Kind::Rock => {
             // Layered stone: broad shapes, fine grain, sharp fractures, faint strata.
             let (wu, wv) = warp(s, u, v, 0.06, 3);
-            let broad = fbm(s, wu, wv, 4, 5, 0.5);
-            let grain = fbm(s + 1, u, v, 24, 4, 0.55);
-            let crease = ridged(s + 2, wu, wv, 5, 4);
-            let (f1, f2, id) = worley(s + 3, wu, wv, 7);
+            let broad = fbm(s, wu, wv, 6, 5, 0.5);
+            let grain = fbm(s + 1, u, v, 40, 4, 0.55);
+            let crease = ridged(s + 2, wu, wv, 8, 4);
+            let (f1, f2, id) = worley(s + 3, wu, wv, 11);
             let crack = 1.0 - smoothstep(0.0, 0.11, f2 - f1);
-            let strata = (wv * 14.0 * std::f32::consts::TAU + broad * 9.0).sin() * 0.5 + 0.5;
-            let pit = 1.0 - smoothstep(0.0, 0.18, worley(s + 4, u, v, 40).0);
+            let strata = (wv * 22.0 * std::f32::consts::TAU + broad * 9.0).sin() * 0.5 + 0.5;
+            let pit = 1.0 - smoothstep(0.0, 0.18, worley(s + 4, u, v, 64).0);
             let h = 0.42 * broad + 0.16 * grain + 0.20 * crease.powf(3.0) + 0.05 * strata
                 - 0.30 * crack
                 - 0.10 * pit
                 + 0.06 * id;
             let tone = 0.50 + 0.42 * broad + 0.10 * grain;
-            let lichen = smoothstep(0.62, 0.78, fbm(s + 5, u, v, 6, 4, 0.55)) * 0.35;
+            let lichen = smoothstep(0.62, 0.78, fbm(s + 5, u, v, 9, 4, 0.55)) * 0.35;
             let warm = fbm(s + 6, u, v, 3, 3, 0.5);
             let mut c = mix3([0.62, 0.62, 0.64], [0.72, 0.66, 0.58], warm);
             c = scale3(c, tone * (0.85 + 0.3 * grain));
@@ -992,5 +992,50 @@ mod tests {
         let top: f32 = m.albedo.chunks(4).map(|p| p[1] as f32).sum::<f32>() / (64.0 * 64.0);
         let tail = calls[calls.len() - 4 + 1] as f32;
         assert!((top - tail).abs() < 45.0, "mean {top} vs 1x1 {tail}");
+    }
+
+    #[test]
+    fn stone_and_masonry_are_mid_grey_so_palettes_tint_them_predictably() {
+        let lin = |b: u8| {
+            let c = b as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        let luma = |kind: Kind| {
+            let m = generate(kind, 64);
+            let sum: f32 = m
+                .albedo
+                .chunks(4)
+                .map(|p| 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]))
+                .sum();
+            sum / (64.0 * 64.0)
+        };
+        for k in [Kind::Rock, Kind::Masonry] {
+            let l = luma(k);
+            assert!((0.3..0.6).contains(&l), "{k:?} luma {l}");
+        }
+        assert!(luma(Kind::Chitin) < 0.2, "husk shells are dark");
+        assert!(
+            luma(Kind::Bone) > luma(Kind::Rock),
+            "bone is paler than rock"
+        );
+    }
+
+    /// `cargo test --release -p hk_game bake_cost -- --ignored --nocapture`
+    #[test]
+    #[ignore = "a timing probe, not a check"]
+    fn bake_cost() {
+        let t = std::time::Instant::now();
+        let mut images = Assets::<Image>::default();
+        let m = build_materials(&mut images);
+        println!(
+            "{} sets at release sizes in {:.2?} (cores: {})",
+            m.0.len(),
+            t.elapsed(),
+            std::thread::available_parallelism().map_or(0, |n| n.get())
+        );
     }
 }

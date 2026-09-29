@@ -35,7 +35,7 @@ impl MeshData {
         self.idx.len() / 3
     }
 
-    fn push(&mut self, p: Vec3, n: Vec3, uv: Vec2, col: [f32; 4]) -> u32 {
+    pub fn push(&mut self, p: Vec3, n: Vec3, uv: Vec2, col: [f32; 4]) -> u32 {
         self.pos.push(p.to_array());
         self.nrm.push(n.to_array());
         self.uv.push(uv.to_array());
@@ -43,7 +43,7 @@ impl MeshData {
         (self.pos.len() - 1) as u32
     }
 
-    fn tri(&mut self, a: u32, b: u32, c: u32) {
+    pub fn tri(&mut self, a: u32, b: u32, c: u32) {
         self.idx.extend([a, b, c]);
     }
 
@@ -63,6 +63,36 @@ impl MeshData {
         self.uv.extend(&other.uv);
         self.col.extend(&other.col);
         self.idx.extend(other.idx.iter().map(|i| i + base));
+    }
+
+    /// Gives every triangle planar texture coordinates from the axis its face
+    /// looks along, `scale` repeats per world unit (`offset` shifts the window).
+    /// Triangles are unwelded so each keeps its own mapping; normals are kept,
+    /// so smooth shapes stay smooth and only the texture seams where the
+    /// dominant axis changes. This is what architecture uses in place of
+    /// hand-made UVs: the texture density is the same on every surface.
+    pub fn box_mapped(&self, scale: f32, offset: Vec2) -> MeshData {
+        let mut out = MeshData::default();
+        for t in self.idx.chunks_exact(3) {
+            let p = [0, 1, 2].map(|k| Vec3::from(self.pos[t[k] as usize]));
+            let a = (p[1] - p[0]).cross(p[2] - p[0]).abs();
+            let plane = |q: Vec3| {
+                let uv = if a.y >= a.x && a.y >= a.z {
+                    Vec2::new(q.x, q.z)
+                } else if a.x >= a.z {
+                    Vec2::new(q.z, q.y)
+                } else {
+                    Vec2::new(q.x, q.y)
+                };
+                uv * scale + offset
+            };
+            let ids = [0, 1, 2].map(|k| {
+                let i = t[k] as usize;
+                out.push(p[k], Vec3::from(self.nrm[i]), plane(p[k]), self.col[i])
+            });
+            out.tri(ids[0], ids[1], ids[2]);
+        }
+        out
     }
 
     /// Applies `m` to every vertex (normals go through the inverse transpose,
@@ -703,6 +733,42 @@ mod tests {
                 assert!(v.iter().all(|c| c.is_finite()), "{name}: {v:?}");
                 assert!((v[3].abs() - 1.0).abs() < 1e-3, "{name}: handedness {v:?}");
             }
+        }
+    }
+
+    #[test]
+    fn box_mapping_gives_every_surface_the_same_texture_density() {
+        // A unit cube: each face maps one world unit to `scale` texture units,
+        // whichever way the face looks.
+        let mut cube = MeshData::default();
+        let (h, w) = (0.5, [1.0; 4]);
+        let uv0 = [Vec2::ZERO; 4];
+        for (n, up, right) in [
+            (Vec3::Z, Vec3::Y, Vec3::X),
+            (Vec3::Y, Vec3::NEG_Z, Vec3::X),
+            (Vec3::X, Vec3::Y, Vec3::NEG_Z),
+        ] {
+            let c = n * h;
+            cube.add_quad(
+                [
+                    c - right * h - up * h,
+                    c + right * h - up * h,
+                    c + right * h + up * h,
+                    c - right * h + up * h,
+                ],
+                n,
+                uv0,
+                [w; 4],
+            );
+        }
+        let mapped = cube.box_mapped(0.25, Vec2::new(0.1, 0.2));
+        ok("box mapped", &mapped);
+        assert_eq!(mapped.triangle_count(), cube.triangle_count());
+        for t in mapped.idx.chunks(3) {
+            let p = [0, 1, 2].map(|k| Vec3::from(mapped.pos[t[k] as usize]));
+            let u = [0, 1, 2].map(|k| Vec2::from(mapped.uv[t[k] as usize]));
+            let (dp, du) = ((p[1] - p[0]).length(), (u[1] - u[0]).length());
+            assert!((du - dp * 0.25).abs() < 1e-5, "{du} vs {dp}");
         }
     }
 

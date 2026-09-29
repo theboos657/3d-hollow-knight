@@ -21,6 +21,12 @@ pub struct LookStyle {
     /// The chamber wall behind the play lane.
     pub wall: Color,
     pub one_way: Color,
+    /// How rough the stone is, as a multiplier on its map (wet stone is low).
+    pub roughness: f32,
+    /// Clearcoat on the stone: the wet sheen on damp and polished rock.
+    pub wet: f32,
+    /// Whether the lip along floors is moss rather than bare stone.
+    pub moss: bool,
     /// Dust motes, fireflies.
     pub mote: Color,
     pub mote_emissive: LinearRgba,
@@ -48,6 +54,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.62, 0.68, 0.78),
             wall: c(0.10, 0.115, 0.19),
             one_way: c(0.55, 0.46, 0.30),
+            roughness: 0.95,
+            wet: 0.0,
+            moss: false,
             mote: c(0.2, 0.6, 0.9),
             mote_emissive: e(0.6, 2.4, 4.0),
             flame: e(1.0, 2.6, 4.0),
@@ -67,6 +76,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.72, 0.62, 0.50),
             wall: c(0.12, 0.105, 0.125),
             one_way: c(0.60, 0.45, 0.28),
+            roughness: 1.0,
+            wet: 0.0,
+            moss: false,
             mote: c(0.9, 0.6, 0.3),
             mote_emissive: e(3.0, 1.6, 0.5),
             flame: e(3.6, 1.7, 0.45),
@@ -86,6 +98,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.34, 0.56, 0.32),
             wall: c(0.045, 0.10, 0.08),
             one_way: c(0.50, 0.42, 0.24),
+            roughness: 0.9,
+            wet: 0.12,
+            moss: true,
             mote: c(0.4, 0.9, 0.5),
             mote_emissive: e(1.0, 3.0, 1.2),
             flame: e(1.0, 3.2, 1.2),
@@ -105,6 +120,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.46, 0.66, 0.76),
             wall: c(0.04, 0.085, 0.14),
             one_way: c(0.42, 0.44, 0.38),
+            roughness: 0.62,
+            wet: 0.35,
+            moss: false,
             mote: c(0.3, 0.8, 0.9),
             mote_emissive: e(0.6, 2.8, 3.4),
             flame: e(0.6, 2.6, 3.4),
@@ -124,6 +142,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.80, 0.70, 0.88),
             wall: c(0.085, 0.06, 0.14),
             one_way: c(0.58, 0.46, 0.30),
+            roughness: 0.72,
+            wet: 0.2,
+            moss: false,
             mote: c(0.95, 0.8, 0.45),
             mote_emissive: e(3.0, 2.2, 0.8),
             flame: e(3.4, 2.4, 0.8),
@@ -143,6 +164,9 @@ pub fn style(t: Theme) -> LookStyle {
             cap: c(0.62, 0.34, 0.30),
             wall: c(0.11, 0.04, 0.06),
             one_way: c(0.55, 0.32, 0.24),
+            roughness: 0.95,
+            wet: 0.0,
+            moss: false,
             mote: c(0.95, 0.35, 0.3),
             mote_emissive: e(3.5, 0.6, 0.5),
             flame: e(3.8, 0.9, 0.4),
@@ -183,6 +207,18 @@ mod tests {
             assert!(s.key_lux > 1000.0 && s.ambient_brightness > 100.0);
             assert!((0.8..1.3).contains(&s.saturation) && (0.9..1.3).contains(&s.contrast));
         }
+    }
+
+    #[test]
+    fn wet_areas_shine_and_dry_ones_do_not() {
+        let (cistern, ashen) = (style(Theme::Cistern), style(Theme::Ashen));
+        assert!(cistern.wet > 0.2 && cistern.roughness < ashen.roughness);
+        assert_eq!(ashen.wet, 0.0);
+        for t in THEMES {
+            let s = style(t);
+            assert!((0.4..=1.0).contains(&s.roughness) && (0.0..=0.6).contains(&s.wet));
+        }
+        assert!(style(Theme::Warrens).moss && !style(Theme::Throne).moss);
     }
 
     #[test]

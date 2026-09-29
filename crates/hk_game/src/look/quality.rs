@@ -29,6 +29,8 @@ pub struct Plan {
     pub shadow_map: u32,
     pub aa: Aa,
     pub ssao: bool,
+    /// Parallax-mapped stone (relief that shifts as you move past it).
+    pub parallax: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,20 +52,28 @@ pub fn plan(q: Quality) -> Plan {
             shadow_map: 1024,
             aa: Aa::Fxaa,
             ssao: false,
+            parallax: false,
         },
         Quality::Medium => Plan {
             shadows: true,
             shadow_map: 2048,
             aa: Aa::Smaa(SmaaLevel::Medium),
             ssao: false,
+            parallax: true,
         },
         Quality::High => Plan {
             shadows: true,
             shadow_map: 4096,
             aa: Aa::Smaa(SmaaLevel::High),
             ssao: true,
+            parallax: true,
         },
     }
+}
+
+/// The tier in force: the `--quality` flag wins over the options menu.
+pub fn current(settings: &Settings, forced: &QualityOverride) -> Quality {
+    forced.0.unwrap_or(settings.quality)
 }
 
 pub fn apply_quality(
@@ -78,7 +88,7 @@ pub fn apply_quality(
     if !settings.is_changed() && !forced.is_changed() && fresh.is_empty() {
         return;
     }
-    let q = forced.0.unwrap_or(settings.quality);
+    let q = current(&settings, &forced);
     let p = plan(q);
     shadow_map.size = p.shadow_map as usize;
     for mut l in &mut key {
@@ -124,6 +134,7 @@ mod tests {
         assert!(!l.shadows && m.shadows && h.shadows);
         assert!(l.shadow_map < m.shadow_map && m.shadow_map < h.shadow_map);
         assert!(!l.ssao && !m.ssao && h.ssao);
+        assert!(!l.parallax && m.parallax && h.parallax);
         assert_eq!(l.aa, Aa::Fxaa);
         assert!(matches!(m.aa, Aa::Smaa(SmaaLevel::Medium)));
         assert!(matches!(h.aa, Aa::Smaa(SmaaLevel::High)));

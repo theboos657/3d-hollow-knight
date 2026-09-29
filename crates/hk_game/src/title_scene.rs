@@ -10,8 +10,9 @@ use bevy::render::view::ColorGrading;
 use hk_sim::world::grid::{Tile, TileGrid};
 
 use crate::look::kits::{bell, chain, pillar, pointed_arch};
+use crate::look::pbr::Materials;
 use crate::look::props::{brazier_meshes, Flame};
-use crate::look::room::spawn_level;
+use crate::look::room::{level_mats, spawn_level};
 use crate::look::style::style;
 use crate::look::{KeyLight, Mote, RimLight};
 use crate::menu::{Back, Screen};
@@ -129,7 +130,7 @@ fn sync_stage(
     knight: Option<Res<KnightAssets>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    pbr: Res<Materials>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut cam: Query<(&mut DistanceFog, &mut ColorGrading), With<MainCamera>>,
@@ -185,17 +186,8 @@ fn sync_stage(
     let stage = TitleStage;
     // The cliff.
     let grid = cliff_grid();
-    let grain = spawn_level(
-        &mut commands,
-        &mut meshes,
-        &mut mats,
-        &mut images,
-        &st,
-        &grid,
-        7,
-        stage,
-    );
-    let _ = grain;
+    let lm = level_mats(&mut mats, &pbr, &st, true);
+    spawn_level(&mut commands, &mut meshes, &lm, &grid, 7, stage);
 
     // The moon and its halo.
     let moon = mats.add(StandardMaterial {

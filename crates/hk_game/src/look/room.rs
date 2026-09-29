@@ -9,12 +9,14 @@ use hk_sim::world::room::{RoomEntered, RoomLibrary};
 use super::decor::build_decor;
 use super::kits::{build_kit, WALL_Z};
 use super::level::{build_level, wall_mesh};
+use super::pbr::{Kind, Materials};
 use super::props::{brazier_meshes, pick_spots, Flame};
-use super::style::style;
-use super::texture::stone_grain;
+use super::quality::{current, plan, QualityOverride};
+use super::style::{style, LookStyle};
 use super::{KeyLight, Mote, RimLight, RoomVisual};
 use crate::rig::meshkit::hash3;
 use crate::scene::MainCamera;
+use crate::settings::Settings;
 
 /// A stable seed from a room's id, so a room always looks the same.
 pub fn room_seed(id: &str) -> u32 {
@@ -23,32 +25,97 @@ pub fn room_seed(id: &str) -> u32 {
     })
 }
 
-/// Spawns a level's stone blocks, floor lips and one-way planks in `st`'s
-/// palette, tagged with `marker`. Returns the stone-grain texture, so the caller
-/// can texture the wall the same way.
-#[allow(clippy::too_many_arguments)]
+/// Texture repeats per world unit on the pillars, arches and near wall behind
+/// the play lane.
+const KIT_UV: f32 = 0.2;
+
+/// The materials a room's architecture is made of: real relief, roughness and
+/// occlusion maps tinted by the area's palette.
+pub struct LevelMats {
+    pub stone: Handle<StandardMaterial>,
+    pub cap: Handle<StandardMaterial>,
+    pub plank: Handle<StandardMaterial>,
+    pub wall: Handle<StandardMaterial>,
+    /// Pillars, arches and ribs behind the play lane (no parallax: it is far
+    /// and curved).
+    pub kit: Handle<StandardMaterial>,
+}
+
+/// Builds the room materials for `st`. `parallax` adds depth-shifted relief to
+/// the stone and the wall (a tier feature).
+pub fn level_mats(
+    mats: &mut Assets<StandardMaterial>,
+    pbr: &Materials,
+    st: &LookStyle,
+    parallax: bool,
+) -> LevelMats {
+    let mut make = |kind: Kind, tint: Color, rough: f32, coat: f32, parallax: bool| {
+        let mut m = pbr.get(kind).material();
+        m.base_color = tint;
+        m.perceptual_roughness = rough;
+        m.clearcoat = coat;
+        m.clearcoat_perceptual_roughness = 0.3;
+        if !parallax {
+            m.depth_map = None;
+        }
+        mats.add(m)
+    };
+    // The maps are mid-grey; these gains bring each surface to the value the
+    // palette was tuned for (the wall stays dark so the knight stands out).
+    let tone = |c: Color, k: f32| {
+        let l = c.to_linear();
+        Color::linear_rgb(l.red * k, l.green * k, l.blue * k)
+    };
+    let cap_kind = if st.moss { Kind::Moss } else { Kind::Rock };
+    LevelMats {
+        stone: make(
+            Kind::Rock,
+            tone(st.stone, 0.8),
+            st.roughness,
+            st.wet,
+            parallax,
+        ),
+        cap: make(
+            cap_kind,
+            // The moss map is already green: wash the palette's tint out
+            // toward neutral so the two do not stack into neon.
+            if st.moss {
+                tone(st.cap.mix(&Color::srgb(0.6, 0.6, 0.6), 0.55), 0.85)
+            } else {
+                tone(st.cap, 0.85)
+            },
+            st.roughness * 0.9,
+            st.wet,
+            parallax,
+        ),
+        plank: make(Kind::Wood, tone(st.one_way, 0.9), 0.9, 0.0, parallax),
+        wall: make(
+            Kind::Masonry,
+            tone(st.wall, 0.7),
+            1.0,
+            st.wet * 0.5,
+            parallax,
+        ),
+        kit: make(
+            Kind::Masonry,
+            tone(Color::srgb(0.5, 0.5, 0.5).mix(&st.stone, 0.6), 0.6),
+            1.0,
+            0.0,
+            false,
+        ),
+    }
+}
+
+/// Spawns a level's stone blocks, floor lips and one-way planks, tagged with
+/// `marker`.
 pub fn spawn_level<M: Bundle + Clone>(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
-    mats: &mut Assets<StandardMaterial>,
-    images: &mut Assets<Image>,
-    st: &super::style::LookStyle,
+    lm: &LevelMats,
     grid: &hk_sim::world::grid::TileGrid,
     seed: u32,
     marker: M,
-) -> Handle<Image> {
-    let grain = stone_grain(images);
-    let mut textured = |base: Color, rough: f32| {
-        mats.add(StandardMaterial {
-            base_color: base,
-            base_color_texture: Some(grain.clone()),
-            perceptual_roughness: rough,
-            ..default()
-        })
-    };
-    let stone = textured(st.stone, 0.92);
-    let cap = textured(st.cap, 0.75);
-    let plank = textured(st.one_way, 0.85);
+) {
     let geo = build_level(grid, seed);
     for (first, m) in geo.chunks {
         commands.spawn((
@@ -57,27 +124,26 @@ pub fn spawn_level<M: Bundle + Clone>(
             // The rock does not cast shadows: a whole ceiling's shadow lands on the
             // wall as a heavy black bar. Actors and props still ground themselves.
             NotShadowCaster,
-            Mesh3d(meshes.add(m.to_mesh())),
-            MeshMaterial3d(stone.clone()),
+            Mesh3d(meshes.add(m.to_mesh_pbr())),
+            MeshMaterial3d(lm.stone.clone()),
             Transform::IDENTITY,
         ));
     }
     commands.spawn((
         marker.clone(),
         NotShadowCaster,
-        Mesh3d(meshes.add(geo.caps.to_mesh())),
-        MeshMaterial3d(cap),
+        Mesh3d(meshes.add(geo.caps.to_mesh_pbr())),
+        MeshMaterial3d(lm.cap.clone()),
         Transform::IDENTITY,
     ));
     commands.spawn((
         marker,
         // Planks would throw floating bars of shadow on the far wall.
         NotShadowCaster,
-        Mesh3d(meshes.add(geo.planks.to_mesh())),
-        MeshMaterial3d(plank),
+        Mesh3d(meshes.add(geo.planks.to_mesh_pbr())),
+        MeshMaterial3d(lm.plank.clone()),
         Transform::IDENTITY,
     ));
-    grain
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -88,7 +154,9 @@ pub fn rebuild_room(
     old: Query<Entity, With<RoomVisual>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
+    pbr: Res<Materials>,
+    settings: Res<Settings>,
+    forced: Res<QualityOverride>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut clear: ResMut<ClearColor>,
     mut cam: Query<(&mut DistanceFog, &mut ColorGrading), With<MainCamera>>,
@@ -129,40 +197,27 @@ pub fn rebuild_room(
     }
 
     let grid = def.grid();
-    let grain = spawn_level(
-        &mut commands,
-        &mut meshes,
+    let lm = level_mats(
         &mut mats,
-        &mut images,
+        &pbr,
         &st,
-        &grid,
-        seed,
-        RoomVisual,
+        plan(current(&settings, &forced)).parallax,
     );
-    let wall = mats.add(StandardMaterial {
-        base_color: st.wall,
-        base_color_texture: Some(grain.clone()),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
+    spawn_level(&mut commands, &mut meshes, &lm, &grid, seed, RoomVisual);
     commands.spawn((
         RoomVisual,
         NotShadowCaster,
         Mesh3d(
-            meshes
-                .add(wall_mesh(grid.width() as f32, grid.height() as f32, WALL_Z, seed).to_mesh()),
+            meshes.add(
+                wall_mesh(grid.width() as f32, grid.height() as f32, WALL_Z, seed).to_mesh_pbr(),
+            ),
         ),
-        MeshMaterial3d(wall),
+        MeshMaterial3d(lm.wall.clone()),
         Transform::IDENTITY,
     ));
 
     // The architecture in front of the wall: stone, glowing panes and light shafts.
     let kit = build_kit(def.theme, grid.width() as f32, grid.height() as f32, seed);
-    let kit_stone = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.5, 0.5, 0.5).mix(&st.stone, 0.6),
-        perceptual_roughness: 1.0,
-        ..default()
-    });
     let kit_glow = mats.add(StandardMaterial {
         base_color: Color::WHITE,
         unlit: true,
@@ -176,19 +231,23 @@ pub fn rebuild_room(
         cull_mode: None,
         ..default()
     });
-    for (m, material, casts) in [(kit.dark, kit_stone, false), (kit.glow, kit_glow, false)] {
-        if m.vertex_count() == 0 {
-            continue;
-        }
-        let mut e = commands.spawn((
+    if kit.dark.vertex_count() > 0 {
+        commands.spawn((
             RoomVisual,
-            Mesh3d(meshes.add(m.to_mesh())),
-            MeshMaterial3d(material),
+            NotShadowCaster,
+            Mesh3d(meshes.add(kit.dark.box_mapped(KIT_UV, Vec2::ZERO).to_mesh_pbr())),
+            MeshMaterial3d(lm.kit.clone()),
             Transform::IDENTITY,
         ));
-        if !casts {
-            e.insert(NotShadowCaster);
-        }
+    }
+    if kit.glow.vertex_count() > 0 {
+        commands.spawn((
+            RoomVisual,
+            NotShadowCaster,
+            Mesh3d(meshes.add(kit.glow.to_mesh())),
+            MeshMaterial3d(kit_glow),
+            Transform::IDENTITY,
+        ));
     }
     if kit.beams.vertex_count() > 0 {
         commands.spawn((
