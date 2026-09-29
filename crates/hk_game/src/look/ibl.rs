@@ -76,9 +76,9 @@ pub fn radiance(theme: Theme, d: Vec3) -> Vec3 {
     // Soft windows in the back wall and one glow behind the viewer: what the
     // wet floor and the metal actually reflect.
     let emitters = [
-        (Vec3::new(-0.45, 0.55, -0.70), key * 9.0, 0.045),
-        (Vec3::new(0.50, 0.35, -0.80), flame * 5.0, 0.06),
-        (Vec3::new(-0.25, 0.60, 0.75), key * 3.0, 0.09),
+        (Vec3::new(-0.45, 0.55, -0.70), key * 8.0, 0.09),
+        (Vec3::new(0.50, 0.35, -0.80), flame * 5.0, 0.11),
+        (Vec3::new(-0.25, 0.60, 0.75), key * 3.0, 0.16),
     ];
     for (dir, colour, width) in emitters {
         let cos = d.dot(dir.normalize());

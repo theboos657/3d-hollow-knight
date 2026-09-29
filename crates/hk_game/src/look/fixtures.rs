@@ -19,7 +19,9 @@ use hk_sim::components::SimPos;
 use hk_sim::world::room::{Ability, Bench, CurrentRoom, Pickup, RoomExit, RoomLibrary};
 
 use super::kits::pointed_arch;
+use super::pbr::{Kind, Materials};
 use super::props::Flame;
+use super::room::surface;
 use super::style::style;
 use crate::rig::meshkit::{cone, ellipsoid, extrude, hash3, ring, tube, MeshData};
 
@@ -238,10 +240,34 @@ pub struct Bob {
     pub amp: f32,
 }
 
-fn stone_material(mats: &mut Assets<StandardMaterial>, c: Color) -> Handle<StandardMaterial> {
+/// Carved stone from the generated rock maps, tinted `c`.
+fn stone_material(
+    mats: &mut Assets<StandardMaterial>,
+    pbr: &Materials,
+    c: Color,
+) -> Handle<StandardMaterial> {
+    let l = c.to_linear();
+    let tint = Color::linear_rgb(l.red * 0.9, l.green * 0.9, l.blue * 0.9);
+    mats.add(surface(pbr, Kind::Rock, tint, 0.9, 0.0, false))
+}
+
+/// A crystal: glass that glows, in the colour `c` with emission `e`.
+fn crystal_material(
+    mats: &mut Assets<StandardMaterial>,
+    c: Color,
+    e: LinearRgba,
+    thickness: f32,
+) -> Handle<StandardMaterial> {
     mats.add(StandardMaterial {
         base_color: c,
-        perceptual_roughness: 0.9,
+        emissive: e,
+        perceptual_roughness: 0.12,
+        reflectance: 0.6,
+        specular_transmission: 0.65,
+        ior: 1.55,
+        thickness,
+        attenuation_color: c,
+        attenuation_distance: 0.25,
         ..default()
     })
 }
@@ -270,6 +296,7 @@ pub fn attach_fixtures(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut mats: ResMut<Assets<StandardMaterial>>,
+    pbr: Res<Materials>,
     library: Res<RoomLibrary>,
     current: Res<CurrentRoom>,
     exits: Query<(Entity, &RoomExit, &SimPos), Added<RoomExit>>,
@@ -290,9 +317,17 @@ pub fn attach_fixtures(
 
     for (e, x, pos) in &exits {
         prep(&mut commands, e, pos);
-        let frame = meshes.add(door_frame(x.half).to_mesh());
+        let frame = meshes.add(
+            door_frame(x.half)
+                .box_mapped(0.35, Vec2::ZERO)
+                .to_mesh_pbr(),
+        );
         let veil = meshes.add(door_veil(x.half).to_mesh());
-        let stone = stone_material(&mut mats, st.stone.mix(&Color::srgb(0.3, 0.3, 0.32), 0.3));
+        let stone = stone_material(
+            &mut mats,
+            &pbr,
+            st.stone.mix(&Color::srgb(0.3, 0.3, 0.32), 0.3),
+        );
         let veil_mat = additive(&mut mats);
         commands.entity(e).with_children(|p| {
             p.spawn((Mesh3d(frame), MeshMaterial3d(stone), Transform::IDENTITY));
@@ -326,17 +361,19 @@ pub fn attach_fixtures(
         prep(&mut commands, e, pos);
         let (stone, iron, lantern) = bench_meshes();
         let (stone, iron, lantern) = (
-            meshes.add(stone.to_mesh()),
-            meshes.add(iron.to_mesh()),
+            meshes.add(stone.box_mapped(0.4, Vec2::ZERO).to_mesh_pbr()),
+            meshes.add(iron.box_mapped(0.6, Vec2::ZERO).to_mesh_pbr()),
             meshes.add(lantern.to_mesh()),
         );
-        let stone_m = stone_material(&mut mats, st.cap);
-        let iron_m = mats.add(StandardMaterial {
-            base_color: Color::srgb(0.10, 0.09, 0.10),
-            perceptual_roughness: 0.55,
-            metallic: 0.7,
-            ..default()
-        });
+        let stone_m = stone_material(&mut mats, &pbr, st.cap);
+        let iron_m = mats.add(surface(
+            &pbr,
+            Kind::Iron,
+            Color::srgb(0.55, 0.55, 0.6),
+            0.9,
+            0.0,
+            false,
+        ));
         let lamp_m = glow_material(&mut mats, LinearRgba::rgb(3.4, 1.9, 0.6));
         let feet = -b.half.y;
         commands.entity(e).with_children(|p| {
@@ -377,24 +414,16 @@ pub fn attach_fixtures(
         prep(&mut commands, e, pos);
         let (core, r1, r2) = pickup_meshes();
         let (core, r1, r2) = (
-            meshes.add(core.to_mesh()),
-            meshes.add(r1.to_mesh()),
-            meshes.add(r2.to_mesh()),
+            meshes.add(core.to_mesh_pbr()),
+            meshes.add(r1.to_mesh_pbr()),
+            meshes.add(r2.to_mesh_pbr()),
         );
         let (colour, emissive) = match pk.ability {
             Ability::Dash => (Color::srgb(0.5, 0.9, 1.0), LinearRgba::rgb(0.8, 2.8, 4.0)),
             Ability::WallGrip => (Color::srgb(1.0, 0.8, 0.4), LinearRgba::rgb(4.0, 2.4, 0.7)),
         };
-        let core_m = mats.add(StandardMaterial {
-            base_color: colour,
-            emissive,
-            ..default()
-        });
-        let ring_m = mats.add(StandardMaterial {
-            base_color: colour,
-            emissive: emissive * 0.6,
-            ..default()
-        });
+        let core_m = crystal_material(&mut mats, colour, emissive, 0.35);
+        let ring_m = crystal_material(&mut mats, colour, emissive * 0.6, 0.1);
         commands.entity(e).with_children(|p| {
             p.spawn((
                 Bob {
@@ -458,12 +487,13 @@ pub fn attach_spikes(
         }
         let mat = material
             .get_or_insert_with(|| {
-                mats.add(StandardMaterial {
-                    base_color: Color::WHITE,
-                    emissive: LinearRgba::rgb(0.55, 0.10, 0.95),
-                    perceptual_roughness: 0.35,
-                    ..default()
-                })
+                // Violet glass with a glow inside: the hazard colour, unchanged.
+                crystal_material(
+                    &mut mats,
+                    Color::srgb(0.75, 0.55, 1.0),
+                    LinearRgba::rgb(0.55, 0.10, 0.95),
+                    0.4,
+                )
             })
             .clone();
         let tiles = (hu.half.x * 2.0).round().max(1.0) as i32;
@@ -481,7 +511,7 @@ pub fn attach_spikes(
                 meshes.add(
                     spike_crystals(tiles, seed)
                         .transformed(at(-(tiles as f32) / 2.0, 0.0, 0.0))
-                        .to_mesh(),
+                        .to_mesh_pbr(),
                 ),
             ),
             MeshMaterial3d(mat),

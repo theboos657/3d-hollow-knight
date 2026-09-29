@@ -14,6 +14,7 @@ pub mod quality;
 pub mod room;
 pub mod style;
 pub mod vignette;
+pub mod wet;
 
 use bevy::prelude::*;
 
@@ -141,6 +142,7 @@ impl Plugin for LookPlugin {
                 fixtures::attach_fixtures,
                 fixtures::attach_spikes,
                 fixtures::animate_fixtures,
+                wet::animate_drips,
             )
                 .after(RenderPrepSet),
         );

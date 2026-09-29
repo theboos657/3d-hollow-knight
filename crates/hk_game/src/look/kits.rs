@@ -25,12 +25,39 @@ pub const HANG_Z: f32 = -2.7;
 
 #[derive(Default)]
 pub struct Kit {
-    /// Stone, iron, wood: lit like the level.
+    /// Masonry: pillars and arches, lit like the level.
     pub dark: MeshData,
+    /// Giant mushrooms.
+    pub fungus: MeshData,
+    /// Hanging roots and vines.
+    pub roots: MeshData,
+    /// Colossal ribs.
+    pub bone: MeshData,
+    /// Iron: chains, wires, pipes, window leading and rims.
+    pub metal: MeshData,
+    /// Cast bells.
+    pub bronze: MeshData,
+    /// Banners.
+    pub cloth: MeshData,
     /// Windows, gills, bells' glints: HDR vertex colours, drawn unlit.
     pub glow: MeshData,
     /// Slanting light shafts: additive, alpha in the vertex colours.
     pub beams: MeshData,
+}
+
+impl Kit {
+    /// Every lit (non-glowing, non-additive) part, by name.
+    pub fn solids(&self) -> [(&'static str, &MeshData); 7] {
+        [
+            ("dark", &self.dark),
+            ("fungus", &self.fungus),
+            ("roots", &self.roots),
+            ("bone", &self.bone),
+            ("metal", &self.metal),
+            ("bronze", &self.bronze),
+            ("cloth", &self.cloth),
+        ]
+    }
 }
 
 struct Dice(u32);
@@ -405,7 +432,7 @@ fn ashen(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
             let wy = d.range(i, 7, 1.5, 4.0);
             let (pane, frame) = window(wx, wy, ww, wh, WALL_Z + 0.15);
             k.glow.merge(&glow_colour(pane, glow));
-            k.dark.merge(&shade(frame, 0.8));
+            k.metal.merge(&shade(frame, 0.8));
             k.beams.merge(&beam(
                 wx,
                 wy + wh * 0.5,
@@ -418,7 +445,7 @@ fn ashen(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
             ));
         }
         if d.f(i, 8) > 0.55 {
-            k.dark.merge(
+            k.cloth.merge(
                 &shade(
                     banner(
                         wx + d.range(i, 10, -2.0, 2.0),
@@ -432,7 +459,7 @@ fn ashen(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
                 )
                 .tinted([0.9, 0.35, 0.3, 1.0]),
             );
-            k.dark
+            k.metal
                 .merge(&shade(chain(wx - 1.6, h + 8.0, 3.0, HANG_Z), 0.6));
         }
     }
@@ -448,7 +475,7 @@ fn warrens(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
         let stalk_h = d.range(i, 3, h * 0.25, h * 0.6);
         let (z, tint) = if near { (NEAR_Z, 1.0) } else { (MID_Z, 0.7) };
         let (body, gills) = mushroom(x, -8.0, stalk_h + 8.0, cap, z);
-        k.dark.merge(
+        k.fungus.merge(
             &vgrad(body, -2.0, h * 0.8, 0.4 * tint, 1.05 * tint).tinted([0.85, 1.0, 0.85, 1.0]),
         );
         k.glow.merge(&glow_colour(gills, glow));
@@ -468,7 +495,7 @@ fn warrens(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
         // Roots and vines hang from the ceiling.
         for r in 0..2 {
             let rx = x + d.range(i, 20 + r, -4.5, 4.5);
-            k.dark.merge(
+            k.roots.merge(
                 &shade(
                     root(
                         rx,
@@ -494,11 +521,11 @@ fn cistern(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
         let r = d.range(i, 1, 1.6, 2.6);
         let ytop = h + d.range(i, 2, -2.0, 4.0);
         let z = if d.f(i, 3) > 0.5 { NEAR_Z } else { MID_Z };
-        k.dark.merge(&shade(
+        k.bronze.merge(&shade(
             bell(x, ytop, r, z),
             if z == NEAR_Z { 1.0 } else { 0.72 },
         ));
-        k.dark
+        k.metal
             .merge(&shade(chain(x, h + 14.0, h + 14.0 - ytop, z), 0.7));
         k.glow.merge(&glow_colour(
             ring(r * 1.0, 0.04, 20, 4)
@@ -528,7 +555,7 @@ fn cistern(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
             });
             k.glow.merge(&disc);
             // A dark iron rim around it.
-            k.dark.merge(&shade(
+            k.metal.merge(&shade(
                 ring(1.14, 0.09, 24, 5)
                     .transformed(Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2))
                     .transformed(at(wx, wy, WALL_Z + 0.2)),
@@ -549,7 +576,7 @@ fn cistern(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
     // Long pipes run along the wall.
     let mut y = 3.0;
     while y < h + 6.0 {
-        k.dark.merge(&shade(
+        k.metal.merge(&shade(
             tube(
                 &[
                     Vec3::new(-14.0, y, NEAR_Z - 0.3),
@@ -603,7 +630,7 @@ fn spire(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
             let c = bands[(t * 3.0) as usize];
             [c[0] * 0.55, c[1] * 0.55, c[2] * 0.55, 1.0]
         }));
-        k.dark.merge(&shade(frame, 0.8));
+        k.metal.merge(&shade(frame, 0.8));
         k.beams.merge(&beam(
             wx,
             wy + wh * 0.5,
@@ -623,7 +650,7 @@ fn spire(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
                 1.2,
                 HANG_Z,
             );
-            k.dark.merge(&shade(wire, 0.6));
+            k.metal.merge(&shade(wire, 0.6));
             k.glow.merge(&glow_colour(lamps, tone(st)));
         }
     }
@@ -637,7 +664,7 @@ fn throne(w: f32, h: f32, d: &Dice, st: &LookStyle, k: &mut Kit) {
         let dir = if d.f(i, 1) > 0.5 { 1.0 } else { -1.0 };
         let radius = d.range(i, 2, 7.0, 12.0);
         let z = if d.f(i, 3) > 0.5 { NEAR_Z } else { MID_Z };
-        k.dark.merge(&shade(
+        k.bone.merge(&shade(
             rib(x, -6.0, radius, dir, z),
             if z == NEAR_Z { 1.0 } else { 0.7 },
         ));
@@ -711,21 +738,23 @@ mod tests {
     fn every_kit_is_well_formed_and_covers_the_room() {
         for t in THEMES {
             let kit = build_kit(t, 60.0, 20.0, 12345);
-            for (name, m) in [
-                ("dark", &kit.dark),
-                ("glow", &kit.glow),
-                ("beams", &kit.beams),
-            ] {
+            let mut all: Vec<(&str, &MeshData)> = kit.solids().to_vec();
+            all.extend([("glow", &kit.glow), ("beams", &kit.beams)]);
+            for (name, m) in all {
                 if m.vertex_count() == 0 {
-                    assert_ne!(name, "dark", "{t:?} has no stone");
                     continue;
                 }
                 m.validate().unwrap_or_else(|e| panic!("{t:?} {name}: {e}"));
             }
-            let (lo, hi) = kit.dark.bounds();
+            let mut whole = MeshData::default();
+            for (_, m) in kit.solids() {
+                whole.merge(m);
+            }
+            assert!(whole.vertex_count() > 0, "{t:?} has no solid parts");
+            let (lo, hi) = whole.bounds();
             assert!(
                 lo.x < 0.0 && hi.x > 60.0,
-                "{t:?} dark spans the room: {lo:?} {hi:?}"
+                "{t:?} solids span the room: {lo:?} {hi:?}"
             );
         }
     }
@@ -734,11 +763,9 @@ mod tests {
     fn nothing_stands_in_front_of_the_level_or_behind_the_wall() {
         for t in THEMES {
             let kit = build_kit(t, 50.0, 18.0, 7);
-            for (name, m) in [
-                ("dark", &kit.dark),
-                ("glow", &kit.glow),
-                ("beams", &kit.beams),
-            ] {
+            let mut all: Vec<(&str, &MeshData)> = kit.solids().to_vec();
+            all.extend([("glow", &kit.glow), ("beams", &kit.beams)]);
+            for (name, m) in all {
                 for p in &m.pos {
                     assert!(
                         p[2] < -1.8 && p[2] > WALL_Z - 0.5,
@@ -764,8 +791,13 @@ mod tests {
         // Merged meshes are uploaded once per room: keep them modest.
         for t in THEMES {
             let kit = build_kit(t, 90.0, 40.0, 3);
-            let verts =
-                kit.dark.vertex_count() + kit.glow.vertex_count() + kit.beams.vertex_count();
+            let verts: usize = kit
+                .solids()
+                .iter()
+                .map(|(_, m)| m.vertex_count())
+                .sum::<usize>()
+                + kit.glow.vertex_count()
+                + kit.beams.vertex_count();
             assert!(verts < 120_000, "{t:?}: {verts} vertices");
         }
     }

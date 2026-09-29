@@ -35,9 +35,37 @@ pub struct LevelMats {
     pub cap: Handle<StandardMaterial>,
     pub plank: Handle<StandardMaterial>,
     pub wall: Handle<StandardMaterial>,
-    /// Pillars, arches and ribs behind the play lane (no parallax: it is far
-    /// and curved).
+    /// Pillars and arches behind the play lane (no parallax: it is far and
+    /// curved).
     pub kit: Handle<StandardMaterial>,
+    pub fungus: Handle<StandardMaterial>,
+    pub roots: Handle<StandardMaterial>,
+    pub bone: Handle<StandardMaterial>,
+    pub metal: Handle<StandardMaterial>,
+    pub bronze: Handle<StandardMaterial>,
+    pub cloth: Handle<StandardMaterial>,
+    /// Loose rubble and stalactites.
+    pub rubble: Handle<StandardMaterial>,
+}
+
+/// One PBR surface: `kind`'s maps tinted, roughened and coated as asked.
+pub fn surface(
+    pbr: &Materials,
+    kind: Kind,
+    tint: Color,
+    rough: f32,
+    coat: f32,
+    parallax: bool,
+) -> StandardMaterial {
+    let mut m = pbr.get(kind).material();
+    m.base_color = tint;
+    m.perceptual_roughness = rough;
+    m.clearcoat = coat;
+    m.clearcoat_perceptual_roughness = 0.3;
+    if !parallax {
+        m.depth_map = None;
+    }
+    m
 }
 
 /// Builds the room materials for `st`. `parallax` adds depth-shifted relief to
@@ -48,17 +76,6 @@ pub fn level_mats(
     st: &LookStyle,
     parallax: bool,
 ) -> LevelMats {
-    let mut make = |kind: Kind, tint: Color, rough: f32, coat: f32, parallax: bool| {
-        let mut m = pbr.get(kind).material();
-        m.base_color = tint;
-        m.perceptual_roughness = rough;
-        m.clearcoat = coat;
-        m.clearcoat_perceptual_roughness = 0.3;
-        if !parallax {
-            m.depth_map = None;
-        }
-        mats.add(m)
-    };
     // The maps are mid-grey; these gains bring each surface to the value the
     // palette was tuned for (the wall stays dark so the knight stands out).
     let tone = |c: Color, k: f32| {
@@ -66,42 +83,110 @@ pub fn level_mats(
         Color::linear_rgb(l.red * k, l.green * k, l.blue * k)
     };
     let cap_kind = if st.moss { Kind::Moss } else { Kind::Rock };
+    // The moss map is already green: wash the palette's tint out toward
+    // neutral so the two do not stack into neon.
+    let cap_tint = if st.moss {
+        tone(st.cap.mix(&Color::srgb(0.6, 0.6, 0.6), 0.55), 0.85)
+    } else {
+        tone(st.cap, 0.85)
+    };
+    let kit_tint = tone(Color::srgb(0.5, 0.5, 0.5).mix(&st.stone, 0.6), 0.6);
+    let mut fungus = surface(
+        pbr,
+        Kind::Flesh,
+        tone(Color::srgb(0.6, 0.9, 0.75).mix(&st.cap, 0.3), 0.7),
+        0.6,
+        0.5,
+        false,
+    );
+    // Waxy flesh that light seeps a little way into.
+    fungus.diffuse_transmission = 0.3;
+    let mut cloth = surface(
+        pbr,
+        Kind::Cloth,
+        Color::srgb(0.9, 0.9, 0.9),
+        1.0,
+        0.0,
+        false,
+    );
+    cloth.cull_mode = None;
+    cloth.double_sided = true;
     LevelMats {
-        stone: make(
+        stone: mats.add(surface(
+            pbr,
             Kind::Rock,
             tone(st.stone, 0.8),
             st.roughness,
             st.wet,
             parallax,
-        ),
-        cap: make(
+        )),
+        cap: mats.add(surface(
+            pbr,
             cap_kind,
-            // The moss map is already green: wash the palette's tint out
-            // toward neutral so the two do not stack into neon.
-            if st.moss {
-                tone(st.cap.mix(&Color::srgb(0.6, 0.6, 0.6), 0.55), 0.85)
-            } else {
-                tone(st.cap, 0.85)
-            },
+            cap_tint,
             st.roughness * 0.9,
             st.wet,
             parallax,
-        ),
-        plank: make(Kind::Wood, tone(st.one_way, 0.9), 0.9, 0.0, parallax),
-        wall: make(
+        )),
+        plank: mats.add(surface(
+            pbr,
+            Kind::Wood,
+            tone(st.one_way, 0.9),
+            0.9,
+            0.0,
+            parallax,
+        )),
+        wall: mats.add(surface(
+            pbr,
             Kind::Masonry,
             tone(st.wall, 0.7),
             1.0,
             st.wet * 0.5,
             parallax,
-        ),
-        kit: make(
-            Kind::Masonry,
-            tone(Color::srgb(0.5, 0.5, 0.5).mix(&st.stone, 0.6), 0.6),
+        )),
+        kit: mats.add(surface(pbr, Kind::Masonry, kit_tint, 1.0, 0.0, false)),
+        fungus: mats.add(fungus),
+        roots: mats.add(surface(
+            pbr,
+            Kind::Wood,
+            tone(Color::srgb(0.55, 0.65, 0.42), 0.6),
             1.0,
             0.0,
             false,
-        ),
+        )),
+        bone: mats.add(surface(
+            pbr,
+            Kind::Bone,
+            tone(Color::srgb(0.85, 0.66, 0.60), 0.6),
+            0.85,
+            0.2,
+            false,
+        )),
+        metal: mats.add(surface(
+            pbr,
+            Kind::Iron,
+            tone(Color::srgb(0.65, 0.68, 0.75), 0.75),
+            1.0,
+            0.0,
+            false,
+        )),
+        bronze: mats.add(surface(
+            pbr,
+            Kind::Bronze,
+            tone(Color::srgb(0.8, 0.72, 0.6), 0.8),
+            0.9,
+            0.3,
+            false,
+        )),
+        cloth: mats.add(cloth),
+        rubble: mats.add(surface(
+            pbr,
+            Kind::Rock,
+            tone(st.stone, 0.9),
+            st.roughness,
+            st.wet,
+            false,
+        )),
     }
 }
 
@@ -226,12 +311,25 @@ pub fn rebuild_room(
         cull_mode: None,
         ..default()
     });
-    if kit.dark.vertex_count() > 0 {
+    // Each family of solid parts in its own material, mapped at its own scale.
+    for (family, mesh) in kit.solids() {
+        let (material, scale) = match family {
+            "dark" => (&lm.kit, KIT_UV),
+            "fungus" => (&lm.fungus, 0.30),
+            "roots" => (&lm.roots, 0.45),
+            "bone" => (&lm.bone, 0.22),
+            "metal" => (&lm.metal, 0.40),
+            "bronze" => (&lm.bronze, 0.22),
+            _ => (&lm.cloth, 0.55),
+        };
+        if mesh.vertex_count() == 0 {
+            continue;
+        }
         commands.spawn((
             RoomVisual,
             NotShadowCaster,
-            Mesh3d(meshes.add(kit.dark.box_mapped(KIT_UV, Vec2::ZERO).to_mesh_pbr())),
-            MeshMaterial3d(lm.kit.clone()),
+            Mesh3d(meshes.add(mesh.box_mapped(scale, Vec2::ZERO).to_mesh_pbr())),
+            MeshMaterial3d(material.clone()),
             Transform::IDENTITY,
         ));
     }
@@ -274,14 +372,9 @@ pub fn rebuild_room(
 
     // Braziers: iron stands with a flame and a flickering pool of light.
     let (stand, flame) = brazier_meshes();
-    let stand = meshes.add(stand.to_mesh());
+    let stand = meshes.add(stand.box_mapped(0.5, Vec2::ZERO).to_mesh_pbr());
     let flame = meshes.add(flame.to_mesh());
-    let iron = mats.add(StandardMaterial {
-        base_color: Color::srgb(0.12, 0.11, 0.12),
-        perceptual_roughness: 0.6,
-        metallic: 0.6,
-        ..default()
-    });
+    let iron = lm.metal.clone();
     let fire = mats.add(StandardMaterial {
         base_color: Color::srgb(0.25, 0.12, 0.05),
         emissive: st.flame,
@@ -325,28 +418,39 @@ pub fn rebuild_room(
             });
     }
 
-    // Growth, rubble, stalactites and chains.
+    // Growth (blades of grass, moss, fronds), rubble, stalactites and chains.
     let decor = build_decor(&grid, def.theme, seed);
-    for (m, base) in [
-        (decor.growth, Color::WHITE),
-        (decor.rubble, Color::srgb(0.85, 0.85, 0.9)),
-        (decor.hangers, Color::srgb(0.9, 0.9, 0.95)),
-    ] {
+    if decor.growth.vertex_count() > 0 {
+        commands.spawn((
+            RoomVisual,
+            NotShadowCaster,
+            Mesh3d(meshes.add(decor.growth.to_mesh())),
+            MeshMaterial3d(mats.add(StandardMaterial {
+                base_color: Color::WHITE,
+                perceptual_roughness: 0.85,
+                // Thin blades are lit from both sides.
+                cull_mode: None,
+                double_sided: true,
+                ..default()
+            })),
+            Transform::IDENTITY,
+        ));
+    }
+    for (m, scale) in [(decor.rubble, 0.5), (decor.hangers, 0.4)] {
         if m.vertex_count() == 0 {
             continue;
         }
         commands.spawn((
             RoomVisual,
             NotShadowCaster,
-            Mesh3d(meshes.add(m.to_mesh())),
-            MeshMaterial3d(mats.add(StandardMaterial {
-                base_color: base,
-                perceptual_roughness: 0.9,
-                ..default()
-            })),
+            Mesh3d(meshes.add(m.box_mapped(scale, Vec2::ZERO).to_mesh_pbr())),
+            MeshMaterial3d(lm.rubble.clone()),
             Transform::IDENTITY,
         ));
     }
+
+    // Puddles and drips, in proportion to how wet the area is.
+    super::wet::spawn_wet(&mut commands, &mut meshes, &mut mats, &grid, seed, st.wet);
 
     // Motes drifting through the air.
     let mote_mesh = meshes.add(Sphere::new(0.07));
