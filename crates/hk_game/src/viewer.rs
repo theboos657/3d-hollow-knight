@@ -3,7 +3,7 @@
 //! headlessly) without having to play up to the right moment.
 //!
 //! `cargo play -- --viewer` (add `--shots room --shot-prefix v_` for a picture);
-//! `--viewer-set knight|enemies` picks the sheet.
+//! `--viewer-set knight|enemies|materials` picks the sheet.
 
 use bevy::prelude::*;
 use hk_sim::tuning::Tuning;
@@ -29,12 +29,15 @@ pub enum ViewerSet {
     Enemies,
     /// One enemy in every state, large.
     Species(Species),
+    /// Every procedural material on a sphere and a slab.
+    Materials,
 }
 
 impl ViewerSet {
     pub fn parse(v: Option<&str>) -> Self {
         match v {
             Some("enemies") => ViewerSet::Enemies,
+            Some("materials") => ViewerSet::Materials,
             Some("husk") => ViewerSet::Species(Species::Husk),
             Some("wisp") => ViewerSet::Species(Species::Wisp),
             Some("shield") => ViewerSet::Species(Species::Shieldbearer),
@@ -47,7 +50,7 @@ impl ViewerSet {
     }
 
     fn is_enemies(self) -> bool {
-        !matches!(self, ViewerSet::Knight)
+        matches!(self, ViewerSet::Enemies | ViewerSet::Species(_))
     }
 }
 
@@ -66,7 +69,8 @@ impl Plugin for ViewerPlugin {
             .insert_resource(ViewerColumns(self.columns.clone()))
             .add_systems(
                 PostStartup,
-                (build_stage, build_enemy_stage).after(crate::models::knight::build_knight_assets),
+                (build_stage, build_enemy_stage, build_material_stage)
+                    .after(crate::models::knight::build_knight_assets),
             )
             .add_systems(
                 Update,
@@ -302,7 +306,105 @@ fn frame_camera(
                 };
                 Transform::from_xyz(0.0, 0.6, dist).looking_at(Vec3::new(0.0, 0.6, 0.0), Vec3::Y)
             }
+            ViewerSet::Materials => {
+                let (dist, y) = if cols.0.is_some() {
+                    (8.5, 0.0)
+                } else {
+                    (17.5, -0.2)
+                };
+                Transform::from_xyz(0.0, y, dist).looking_at(Vec3::new(0.0, y, 0.0), Vec3::Y)
+            }
         };
+    }
+}
+
+// --------------------------------------------------------------- materials --
+
+/// Every material as a sphere over a slab, lit from two sides, so the normal,
+/// roughness, metal and height maps can be judged by eye.
+fn build_material_stage(
+    mut commands: Commands,
+    set: Res<ViewerSet>,
+    cols: Res<ViewerColumns>,
+    materials: Res<crate::look::pbr::Materials>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<StandardMaterial>>,
+) {
+    use crate::look::pbr::Kind;
+    use crate::rig::meshkit::{ellipsoid, MeshData};
+
+    if *set != ViewerSet::Materials {
+        return;
+    }
+    let kinds: Vec<Kind> = match &cols.0 {
+        Some(pick) => pick
+            .iter()
+            .filter_map(|&i| Kind::ALL.get(i).copied())
+            .collect(),
+        None => Kind::ALL.to_vec(),
+    };
+    let per_row = if cols.0.is_some() {
+        kinds.len().max(1)
+    } else {
+        7
+    };
+    let (step_x, step_y) = (2.3, 4.6);
+    let sphere = meshes.add(ellipsoid(0.95, 0.95, 0.95, 40, 64).to_mesh_pbr());
+    let mut slab = MeshData::default();
+    let (h, white) = (0.95, [1.0; 4]);
+    slab.add_quad(
+        [
+            Vec3::new(-h, -h, 0.0),
+            Vec3::new(h, -h, 0.0),
+            Vec3::new(h, h, 0.0),
+            Vec3::new(-h, h, 0.0),
+        ],
+        Vec3::Z,
+        [
+            Vec2::new(0.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(0.0, 0.0),
+        ],
+        [white; 4],
+    );
+    let slab = meshes.add(slab.to_mesh_pbr());
+    let rows = kinds.len().div_ceil(per_row);
+    for (i, kind) in kinds.iter().enumerate() {
+        let (row, col) = (i / per_row, i % per_row);
+        let x = (col as f32 - (per_row as f32 - 1.0) / 2.0) * step_x;
+        let y = ((rows as f32 - 1.0) / 2.0 - row as f32) * step_y;
+        println!("viewer: row {row} column {col}: {kind:?}");
+        let material = mats.add(materials.get(*kind).material());
+        for (mesh, dy) in [(sphere.clone(), 1.2), (slab.clone(), -1.2)] {
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(x, y + dy, 0.0),
+            ));
+        }
+    }
+    for (pos, color, lux) in [
+        (
+            Vec3::new(-7.0, 5.0, 8.0),
+            Color::srgb(1.0, 0.9, 0.75),
+            9.0e6,
+        ),
+        (
+            Vec3::new(8.0, -2.0, 6.0),
+            Color::srgb(0.55, 0.7, 1.0),
+            3.0e6,
+        ),
+    ] {
+        commands.spawn((
+            PointLight {
+                intensity: lux,
+                range: 80.0,
+                color,
+                ..default()
+            },
+            Transform::from_translation(pos),
+        ));
     }
 }
 

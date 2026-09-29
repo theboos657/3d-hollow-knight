@@ -200,6 +200,17 @@ impl MeshData {
         m.insert_indices(Indices::U32(self.idx.clone()));
         m
     }
+
+    /// `to_mesh` plus mikktspace tangents, so a material's normal map lights
+    /// correctly. Where the UVs are unusable (a mesh with no area in UV space)
+    /// the tangents are simply left off and the normal map is ignored.
+    pub fn to_mesh_pbr(&self) -> Mesh {
+        let mut m = self.to_mesh();
+        if self.idx.len() >= 3 {
+            let _ = m.generate_tangents();
+        }
+        m
+    }
 }
 
 /// Deterministic hash noise in `[0, 1)`.
@@ -663,6 +674,36 @@ mod tests {
         );
         ok("crescent", &crescent(2.0, 0.1, 0.9, 2.0, -1.0, 12));
         ok("crescent ccw", &crescent(2.0, 0.1, 0.9, -1.0, 2.0, 12));
+    }
+
+    #[test]
+    fn pbr_meshes_get_finite_tangents_for_their_normal_maps() {
+        use bevy::mesh::VertexAttributeValues;
+        let shapes = [
+            (
+                "lathe",
+                lathe(&[(0.5, 0.0), (0.5, 1.0), (0.2, 1.4), (0.0, 1.6)], 12),
+            ),
+            ("ellipsoid", ellipsoid(0.5, 0.8, 0.4, 8, 12)),
+            ("ring", ring(1.0, 0.1, 16, 6)),
+            (
+                "limb",
+                limb(Vec3::ZERO, Vec3::new(0.0, -1.0, 0.0), 0.1, 0.06, 8),
+            ),
+            ("blade", blade(1.5, 0.12, 0.05, 0.8)),
+        ];
+        for (name, data) in shapes {
+            let mesh = data.to_mesh_pbr();
+            let Some(VertexAttributeValues::Float32x4(t)) = mesh.attribute(Mesh::ATTRIBUTE_TANGENT)
+            else {
+                panic!("{name}: no tangents");
+            };
+            assert_eq!(t.len(), data.vertex_count(), "{name}");
+            for v in t {
+                assert!(v.iter().all(|c| c.is_finite()), "{name}: {v:?}");
+                assert!((v[3].abs() - 1.0).abs() < 1e-3, "{name}: handedness {v:?}");
+            }
+        }
     }
 
     #[test]

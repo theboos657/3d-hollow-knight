@@ -6,6 +6,7 @@ pub mod decor;
 pub mod fixtures;
 pub mod kits;
 pub mod level;
+pub mod pbr;
 pub mod props;
 pub mod quality;
 pub mod room;
@@ -98,18 +99,20 @@ pub struct LookPlugin;
 
 impl Plugin for LookPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<quality::QualityOverride>().add_systems(
-            Update,
-            (
-                room::rebuild_room,
-                props::flicker,
-                drift_motes,
-                quality::apply_quality,
-                fixtures::attach_fixtures,
-                fixtures::attach_spikes,
-                fixtures::animate_fixtures,
-            )
-                .after(RenderPrepSet),
-        );
+        app.add_plugins(pbr::PbrPlugin)
+            .init_resource::<quality::QualityOverride>()
+            .add_systems(
+                Update,
+                (
+                    room::rebuild_room,
+                    props::flicker,
+                    drift_motes,
+                    quality::apply_quality,
+                    fixtures::attach_fixtures,
+                    fixtures::attach_spikes,
+                    fixtures::animate_fixtures,
+                )
+                    .after(RenderPrepSet),
+            );
     }
 }
