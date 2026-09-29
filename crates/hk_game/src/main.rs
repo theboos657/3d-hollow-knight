@@ -130,7 +130,11 @@ fn main() {
         world_view::WorldViewPlugin,
         visuals::VisualsPlugin,
         camera_rig::CameraRigPlugin,
-        (vfx::VfxPlugin, models::knight::KnightPlugin),
+        (
+            vfx::VfxPlugin,
+            models::knight::KnightPlugin,
+            models::enemies::EnemyModelsPlugin,
+        ),
         boss_view::BossViewPlugin,
         toast::ToastPlugin,
         hud::HudPlugin,
@@ -154,7 +158,14 @@ fn main() {
 
     // A smoke run is scripted (see debug.rs); real devices would fight it.
     if viewer {
-        app.add_plugins(viewer::ViewerPlugin);
+        app.add_plugins(viewer::ViewerPlugin {
+            set: viewer::ViewerSet::parse(value_of("--viewer-set").as_deref()),
+            columns: value_of("--viewer-cols").map(|v| {
+                v.split(',')
+                    .filter_map(|c| c.trim().parse::<usize>().ok())
+                    .collect()
+            }),
+        });
     }
     if args.iter().any(|a| a == "--show-hitboxes") {
         app.insert_resource(visuals::ShowHitboxes(true));

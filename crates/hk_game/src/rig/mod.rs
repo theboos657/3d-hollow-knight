@@ -17,6 +17,7 @@
 //! Joints carry a [`Rest`] transform; the pose functions produce deltas that
 //! [`posed`] applies on top, so a pose can be swapped without rebuilding.
 
+pub mod creature;
 pub mod meshkit;
 pub mod pose;
 

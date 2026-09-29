@@ -5,10 +5,8 @@ use bevy::prelude::*;
 use hk_sim::boss::{Boss, Pendulum};
 use hk_sim::combat::*;
 use hk_sim::components::{Aabb, SimPos};
-use hk_sim::enemy::{Brain, EnemyKind, EnemyState};
 use hk_sim::player::Player;
 use hk_sim::world::room::{CurrentRoom, RoomEntered, RoomLibrary};
-use hk_sim::SimTick;
 
 use crate::interp::{Interpolated, RenderPrepSet};
 use crate::scene::Palette;
@@ -26,48 +24,22 @@ impl Plugin for VisualsPlugin {
             .add_systems(PostStartup, spawn_hud)
             .add_systems(
                 Update,
-                (
-                    attach_body_visuals,
-                    attach_hit_visuals,
-                    enemy_fx,
-                    update_shield_plates,
-                    room_banner,
-                )
-                    .after(RenderPrepSet),
+                (attach_body_visuals, attach_hit_visuals, room_banner).after(RenderPrepSet),
             );
     }
 }
 
 // ---------------------------------------------------------------- visuals --
 
-fn kind_color(kind: EnemyKind) -> Color {
-    match kind {
-        EnemyKind::Husk => Color::srgb(0.7, 0.3, 0.2),
-        EnemyKind::Wisp => Color::srgb(0.6, 0.35, 0.9),
-        EnemyKind::Shieldbearer => Color::srgb(0.25, 0.55, 0.6),
-        EnemyKind::Spitter => Color::srgb(0.4, 0.7, 0.3),
-    }
-}
-
-#[derive(Component)]
-struct ShieldPlate;
-
-/// Bodies (player, dummies, enemies, spikes) get a box the size of their
-/// hurt/collision box. Real enemies get their own material so state tints work.
+/// Hazards and player-team markers get a plain box the size of their hurt/
+/// collision box. Enemies and the training dummy have real models
+/// (`models::enemies`), so they are left alone here.
 fn attach_body_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
     pal: Res<Palette>,
     q: Query<
-        (
-            Entity,
-            &Hurtbox,
-            Option<&Aabb>,
-            &SimPos,
-            Option<&Brain>,
-            Has<Guard>,
-        ),
+        (Entity, &Hurtbox, Option<&Aabb>, &SimPos),
         (
             Added<Hurtbox>,
             Without<Boss>,
@@ -76,93 +48,22 @@ fn attach_body_visuals(
         ),
     >,
 ) {
-    for (e, hu, aabb, pos, brain, guard) in &q {
-        let half = aabb.map_or(hu.half, |a| a.half);
-        let (mesh, mat) = if let Some(b) = brain {
-            let mesh = if b.kind == EnemyKind::Wisp {
-                meshes.add(Sphere::new(half.x))
-            } else {
-                meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8))
-            };
-            let m = mats.add(StandardMaterial {
-                base_color: kind_color(b.kind),
-                ..default()
-            });
-            (mesh, m)
-        } else {
-            let mat = match hu.team {
-                Team::Player => &pal.marker,
-                Team::Enemy => &pal.enemy,
-                Team::Hazard => &pal.hazard,
-            };
-            (
-                meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8)),
-                mat.clone(),
-            )
+    for (e, hu, aabb, pos) in &q {
+        let mat = match hu.team {
+            Team::Enemy => continue,
+            Team::Player => &pal.marker,
+            Team::Hazard => &pal.hazard,
         };
+        let half = aabb.map_or(hu.half, |a| a.half);
         commands.entity(e).insert((
-            Mesh3d(mesh),
-            MeshMaterial3d(mat),
+            Mesh3d(meshes.add(Cuboid::new(half.x * 2.0, half.y * 2.0, 0.8))),
+            MeshMaterial3d(mat.clone()),
             Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
             Interpolated {
                 z: 0.0,
                 offset: Vec2::ZERO,
             },
         ));
-        if guard {
-            let plate = mats.add(StandardMaterial {
-                base_color: Color::srgb(0.75, 0.80, 0.85),
-                metallic: 0.6,
-                perceptual_roughness: 0.35,
-                ..default()
-            });
-            commands.entity(e).with_children(|p| {
-                p.spawn((
-                    ShieldPlate,
-                    Mesh3d(meshes.add(Cuboid::new(0.18, half.y * 1.7, 1.1))),
-                    MeshMaterial3d(plate.clone()),
-                    Transform::from_xyz(half.x + 0.1, 0.0, 0.1),
-                ));
-            });
-        }
-    }
-}
-
-/// The shield plate sits on the side the Shieldbearer is guarding.
-fn update_shield_plates(
-    guards: Query<(&Guard, &Children)>,
-    mut plates: Query<&mut Transform, With<ShieldPlate>>,
-) {
-    for (g, children) in &guards {
-        for c in children.iter() {
-            if let Ok(mut t) = plates.get_mut(c) {
-                t.translation.x = 0.65 * g.facing as f32;
-            }
-        }
-    }
-}
-
-/// Telegraph colours: what an enemy is doing must be readable at a glance.
-fn enemy_fx(
-    tick: Res<SimTick>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    q: Query<(&Brain, &MeshMaterial3d<StandardMaterial>)>,
-) {
-    for (b, handle) in &q {
-        let Some(m) = mats.get_mut(&handle.0) else {
-            continue;
-        };
-        let base = kind_color(b.kind).to_linear();
-        m.emissive = match b.state {
-            EnemyState::Idle => LinearRgba::rgb(base.red * 0.1, base.green * 0.1, base.blue * 0.1),
-            EnemyState::Chase => LinearRgba::rgb(base.red * 0.3, base.green * 0.3, base.blue * 0.3),
-            EnemyState::Notice => LinearRgba::rgb(2.0, 1.8, 0.2),
-            EnemyState::Windup if (tick.0 / 4) & 1 == 0 => LinearRgba::rgb(4.0, 2.4, 0.4),
-            EnemyState::Windup => LinearRgba::rgb(1.6, 0.8, 0.1),
-            EnemyState::Attack => LinearRgba::rgb(4.0, 0.3, 0.3),
-            EnemyState::Recover => LinearRgba::rgb(0.1, 0.35, 1.4),
-            EnemyState::Stagger => LinearRgba::rgb(2.0, 2.0, 2.0),
-        };
     }
 }
 

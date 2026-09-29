@@ -32,7 +32,6 @@ pub struct MainCamera;
 /// Materials for things that look the same in every theme (actors, effects).
 #[derive(Resource, Clone)]
 pub struct Palette {
-    pub enemy: Handle<StandardMaterial>,
     pub hazard: Handle<StandardMaterial>,
     pub slash: Handle<StandardMaterial>,
     pub bolt: Handle<StandardMaterial>,
@@ -58,11 +57,6 @@ fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMateria
             ..default()
         })
     };
-    let enemy = emissive(
-        Color::srgb(0.75, 0.25, 0.2),
-        LinearRgba::rgb(0.25, 0.04, 0.02),
-        1.0,
-    );
     let hazard = emissive(
         Color::srgb(0.6, 0.2, 0.7),
         LinearRgba::rgb(0.8, 0.2, 1.2),
@@ -80,7 +74,6 @@ fn spawn_palette(mut commands: Commands, mut mats: ResMut<Assets<StandardMateria
     );
 
     commands.insert_resource(Palette {
-        enemy,
         hazard,
         slash,
         bolt,
