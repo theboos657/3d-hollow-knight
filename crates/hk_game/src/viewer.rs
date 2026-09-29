@@ -40,6 +40,8 @@ impl ViewerSet {
             Some("shield") => ViewerSet::Species(Species::Shieldbearer),
             Some("spitter") => ViewerSet::Species(Species::Spitter),
             Some("dummy") => ViewerSet::Species(Species::Dummy),
+            Some("matron") => ViewerSet::Species(Species::Matron),
+            Some("warden") => ViewerSet::Species(Species::Bellwarden),
             _ => ViewerSet::Knight,
         }
     }
@@ -289,9 +291,15 @@ fn frame_camera(
             ViewerSet::Enemies => {
                 Transform::from_xyz(0.0, -5.2, 27.0).looking_at(Vec3::new(0.0, -5.4, 0.0), Vec3::Y)
             }
-            ViewerSet::Species(_) => {
+            ViewerSet::Species(sp) => {
                 // Zoomed in when only a few columns are shown.
-                let dist = if cols.0.is_some() { 8.5 } else { 12.5 };
+                let boss = matches!(sp, Species::Matron | Species::Bellwarden);
+                let dist = match (boss, cols.0.is_some()) {
+                    (false, true) => 8.5,
+                    (false, false) => 12.5,
+                    (true, true) => 22.0,
+                    (true, false) => 40.0,
+                };
                 Transform::from_xyz(0.0, 0.6, dist).looking_at(Vec3::new(0.0, 0.6, 0.0), Vec3::Y)
             }
         };
@@ -308,6 +316,115 @@ struct ViewerCreature {
     /// Freeze `t` at this fraction of the state's length.
     at: f32,
     walking: bool,
+    /// Bosses have no planned length in the viewer: use this many ticks.
+    fixed_len: Option<f32>,
+}
+
+/// The poses of a boss sheet.
+fn boss_columns() -> Vec<(&'static str, CreatureIn, f32)> {
+    use crate::rig::creature::BossAtk;
+    let base = CreatureIn::default();
+    let with = |f: &dyn Fn(&mut CreatureIn)| {
+        let mut c = base;
+        f(&mut c);
+        c
+    };
+    vec![
+        ("sleep", with(&|c| c.sleeping = true), 0.0),
+        ("roar", with(&|c| c.state = EnemyState::Notice), 1.0),
+        (
+            "walk",
+            with(&|c| {
+                c.state = EnemyState::Chase;
+                c.vx = 3.0;
+            }),
+            0.0,
+        ),
+        (
+            "tell-slam",
+            with(&|c| {
+                c.state = EnemyState::Windup;
+                c.atk = BossAtk::Slam;
+            }),
+            1.0,
+        ),
+        (
+            "slam-air",
+            with(&|c| {
+                c.state = EnemyState::Attack;
+                c.atk = BossAtk::Slam;
+                c.airborne = true;
+            }),
+            0.3,
+        ),
+        (
+            "slam-land",
+            with(&|c| {
+                c.state = EnemyState::Attack;
+                c.atk = BossAtk::Slam;
+            }),
+            0.7,
+        ),
+        (
+            "tell-charge",
+            with(&|c| {
+                c.state = EnemyState::Windup;
+                c.atk = BossAtk::Charge;
+            }),
+            1.0,
+        ),
+        (
+            "charge",
+            with(&|c| {
+                c.state = EnemyState::Attack;
+                c.atk = BossAtk::Charge;
+                c.vx = 12.0;
+            }),
+            0.5,
+        ),
+        (
+            "tell-sweep",
+            with(&|c| {
+                c.state = EnemyState::Windup;
+                c.atk = BossAtk::Sweep;
+            }),
+            1.0,
+        ),
+        (
+            "sweep",
+            with(&|c| {
+                c.state = EnemyState::Attack;
+                c.atk = BossAtk::Sweep;
+            }),
+            0.4,
+        ),
+        (
+            "toll",
+            with(&|c| {
+                c.state = EnemyState::Attack;
+                c.atk = BossAtk::Toll;
+            }),
+            0.5,
+        ),
+        ("recover", with(&|c| c.state = EnemyState::Recover), 0.05),
+        (
+            "wall-stun",
+            with(&|c| {
+                c.state = EnemyState::Recover;
+                c.wall = true;
+            }),
+            0.3,
+        ),
+        (
+            "phase-2",
+            with(&|c| {
+                c.state = EnemyState::Chase;
+                c.phase = 2;
+            }),
+            0.0,
+        ),
+        ("dying", with(&|c| c.dying = 0.7), 0.0),
+    ]
 }
 
 const ENEMY_COLUMNS: [(&str, EnemyState, f32, bool); 7] = [
@@ -321,13 +438,22 @@ const ENEMY_COLUMNS: [(&str, EnemyState, f32, bool); 7] = [
 ];
 
 /// Species, half height of its hurtbox, and how far off the floor it hovers.
-const ENEMY_ROWS: [(Species, f32, f32); 5] = [
+const ENEMY_ROWS: [(Species, f32, f32); 7] = [
     (Species::Husk, 0.6, 0.0),
     (Species::Wisp, 0.45, 0.8),
     (Species::Shieldbearer, 0.75, 0.0),
     (Species::Spitter, 0.6, 0.0),
     (Species::Dummy, 0.6, 0.0),
+    (Species::Matron, 1.0, 0.0),
+    (Species::Bellwarden, 1.4, 0.0),
 ];
+
+fn rows_are_bosses(set: &ViewerSet) -> bool {
+    matches!(
+        set,
+        ViewerSet::Species(Species::Matron | Species::Bellwarden)
+    )
+}
 
 fn build_enemy_stage(
     mut commands: Commands,
@@ -345,23 +471,48 @@ fn build_enemy_stage(
         perceptual_roughness: 0.9,
         ..default()
     });
-    let step = 2.5;
+    let boss_row = rows_are_bosses(&set);
+    let step = if boss_row { 4.4 } else { 2.5 };
     let pitch = 3.3;
     let rows: Vec<(Species, f32, f32)> = ENEMY_ROWS
         .into_iter()
         .filter(|(sp, _, _)| match *set {
             ViewerSet::Species(only) => *sp == only,
-            _ => true,
+            // The overview shows the small ones; the bosses have sheets of their own.
+            _ => !matches!(sp, Species::Matron | Species::Bellwarden),
         })
         .collect();
     for (row, (species, half_y, lift)) in rows.into_iter().enumerate() {
         let y = -(row as f32) * pitch;
         commands.spawn((
-            Mesh3d(meshes.add(Cuboid::new(7.0 * step + 2.0, 0.2, 3.0))),
+            Mesh3d(meshes.add(Cuboid::new(7.0 * step + 2.0, 0.2, 4.0))),
             MeshMaterial3d(floor.clone()),
             Transform::from_xyz(0.0, y - 0.1, 0.0),
         ));
-        for (col, (name, state, at, walking)) in ENEMY_COLUMNS.into_iter().enumerate() {
+        let is_boss = matches!(species, Species::Matron | Species::Bellwarden);
+        let columns: Vec<(&str, CreatureIn, f32, bool)> = if is_boss {
+            boss_columns()
+                .into_iter()
+                .map(|(n, c, at)| (n, c, at, c.vx.abs() > 0.5))
+                .collect()
+        } else {
+            ENEMY_COLUMNS
+                .into_iter()
+                .map(|(n, st, at, w)| {
+                    (
+                        n,
+                        CreatureIn {
+                            state: st,
+                            vx: if w { 3.0 } else { 0.0 },
+                            ..Default::default()
+                        },
+                        at,
+                        w,
+                    )
+                })
+                .collect()
+        };
+        for (col, (name, patch, at, walking)) in columns.into_iter().enumerate() {
             let shown = cols.0.as_ref().map_or(0.0, |c| {
                 if c.contains(&col) {
                     c.iter().position(|k| *k == col).unwrap_or(0) as f32
@@ -383,7 +534,7 @@ fn build_enemy_stage(
             };
             let x = match &cols.0 {
                 Some(c) => (shown - (c.len() as f32 - 1.0) / 2.0) * step,
-                None => (col as f32 - 3.0) * step,
+                None => (col as f32 - if is_boss { 7.0 } else { 3.0 }) * step,
             };
             println!("viewer: {species:?} {name}");
             let anchor = commands
@@ -404,15 +555,14 @@ fn build_enemy_stage(
                 ViewerCreature {
                     input: CreatureIn {
                         species,
-                        state,
                         aim,
                         sway,
-                        vx: if walking { 3.0 } else { 0.0 },
-                        ..Default::default()
+                        ..patch
                     },
                     facing: 1,
                     at,
                     walking,
+                    fixed_len: is_boss.then_some(60.0),
                 },
             ));
         }
@@ -459,7 +609,9 @@ fn animate_viewer_creatures(
             Species::Shieldbearer => hk_sim::enemy::EnemyKind::Shieldbearer,
             _ => hk_sim::enemy::EnemyKind::Spitter,
         };
-        let len = state_len(kind, vc.input.state, &tuning.enemies);
+        let len = vc
+            .fixed_len
+            .unwrap_or_else(|| state_len(kind, vc.input.state, &tuning.enemies));
         vc.input.len = len;
         vc.input.t = len * vc.at;
         vc.input.clock = anim.clock;

@@ -8,13 +8,12 @@ use hk_sim::boss::{
     Pendulum,
 };
 use hk_sim::combat::Health;
-use hk_sim::components::{Aabb, SimPos};
+use hk_sim::components::SimPos;
 use hk_sim::tuning::Tuning;
-use hk_sim::world::room::RoomExit;
-use hk_sim::SimTick;
 
 use crate::camera_rig::Rig;
 use crate::interp::{Interpolated, RenderPrepSet};
+use crate::look::fixtures::{ExitLight, ExitVeil};
 
 pub struct BossViewPlugin;
 
@@ -23,9 +22,6 @@ impl Plugin for BossViewPlugin {
         app.add_systems(PostStartup, spawn_boss_bar).add_systems(
             Update,
             (
-                attach_boss_visuals,
-                update_boss_eyes,
-                boss_fx,
                 attach_glyph_visuals,
                 glyph_fx,
                 attach_pendulum_visuals,
@@ -36,148 +32,6 @@ impl Plugin for BossViewPlugin {
             )
                 .after(RenderPrepSet),
         );
-    }
-}
-
-// ------------------------------------------------------------------- body --
-
-struct Look {
-    body: Color,
-    trim: Color,
-    eye: Color,
-    eye_glow: LinearRgba,
-}
-
-fn look(id: &str) -> Look {
-    match id {
-        // The Matron: a hunched, mossy brute with acid-green eyes.
-        "matron" => Look {
-            body: Color::srgb(0.30, 0.38, 0.22),
-            trim: Color::srgb(0.16, 0.21, 0.12),
-            eye: Color::srgb(0.7, 1.0, 0.4),
-            eye_glow: LinearRgba::rgb(1.4, 3.2, 0.6),
-        },
-        // The Bellwarden: a bronze bell-keeper with furnace-orange eyes.
-        _ => Look {
-            body: Color::srgb(0.52, 0.36, 0.16),
-            trim: Color::srgb(0.30, 0.20, 0.08),
-            eye: Color::srgb(1.0, 0.7, 0.3),
-            eye_glow: LinearRgba::rgb(3.4, 1.8, 0.4),
-        },
-    }
-}
-
-#[derive(Component)]
-struct BossEyes {
-    reach: f32,
-}
-
-/// A boss is a big box with a domed "bell" crown and two glowing eyes that
-/// look the way it faces. It owns its material so state tints don't leak.
-fn attach_boss_visuals(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    q: Query<(Entity, &Boss, &Aabb, &SimPos), Added<Boss>>,
-) {
-    for (e, boss, aabb, pos) in &q {
-        let l = look(&boss.id);
-        let h = aabb.half;
-        let body = mats.add(StandardMaterial {
-            base_color: l.body,
-            perceptual_roughness: 0.65,
-            metallic: 0.25,
-            ..default()
-        });
-        let trim = mats.add(StandardMaterial {
-            base_color: l.trim,
-            perceptual_roughness: 0.8,
-            ..default()
-        });
-        let eye = mats.add(StandardMaterial {
-            base_color: l.eye,
-            emissive: l.eye_glow,
-            ..default()
-        });
-        commands
-            .entity(e)
-            .insert((
-                Mesh3d(meshes.add(Cuboid::new(h.x * 2.0, h.y * 2.0, 1.8))),
-                MeshMaterial3d(body),
-                Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
-                Interpolated {
-                    z: 0.0,
-                    offset: Vec2::ZERO,
-                },
-            ))
-            .with_children(|p| {
-                // Crown: a squashed dome sitting on the shoulders.
-                p.spawn((
-                    Mesh3d(meshes.add(Sphere::new(h.x * 0.9))),
-                    MeshMaterial3d(trim.clone()),
-                    Transform::from_xyz(0.0, h.y, 0.0).with_scale(Vec3::new(1.0, 0.55, 0.75)),
-                ));
-                // Belt band, to break up the silhouette.
-                p.spawn((
-                    Mesh3d(meshes.add(Cuboid::new(h.x * 2.08, h.y * 0.28, 1.9))),
-                    MeshMaterial3d(trim),
-                    Transform::from_xyz(0.0, -h.y * 0.25, 0.0),
-                ));
-                for dy in [0.0, 0.32] {
-                    p.spawn((
-                        BossEyes { reach: h.x * 0.5 },
-                        Mesh3d(meshes.add(Cuboid::new(0.42, 0.16, 0.3))),
-                        MeshMaterial3d(eye.clone()),
-                        Transform::from_xyz(-h.x * 0.5, h.y * (0.35 + dy), 0.95),
-                    ));
-                }
-            });
-    }
-}
-
-fn update_boss_eyes(
-    bosses: Query<(&BossBrain, &Children)>,
-    mut eyes: Query<(&BossEyes, &mut Transform)>,
-) {
-    for (b, children) in &bosses {
-        for c in children.iter() {
-            if let Ok((eye, mut t)) = eyes.get_mut(c) {
-                t.translation.x = eye.reach * b.facing as f32;
-            }
-        }
-    }
-}
-
-/// Tells: the same colour language as ordinary enemies, so it's learned once.
-/// Amber flicker = an attack is coming, red = it is happening, blue = punish.
-fn boss_fx(
-    tick: Res<SimTick>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    q: Query<(&BossBrain, &MeshMaterial3d<StandardMaterial>)>,
-) {
-    let blink = (tick.0 / 4) & 1 == 0;
-    let e = LinearRgba::rgb;
-    for (b, handle) in &q {
-        let Some(m) = mats.get_mut(&handle.0) else {
-            continue;
-        };
-        let calm = 0.06 + 0.05 * b.phase as f32;
-        m.emissive = match b.state {
-            BossState::Sleeping => e(0.0, 0.0, 0.0),
-            BossState::Intro | BossState::Transition => {
-                let p = 0.5 + 0.5 * (tick.0 as f32 * 0.09).sin();
-                e(2.0 * p + 0.3, 1.6 * p + 0.3, 0.6 * p)
-            }
-            BossState::Choose | BossState::Approach => e(calm, calm * 0.5, calm * 0.3),
-            BossState::Telegraph if blink => e(4.0, 2.4, 0.4),
-            BossState::Telegraph => e(1.6, 0.8, 0.1),
-            BossState::Active => e(4.0, 0.3, 0.3),
-            BossState::Recover => e(0.1, 0.35, 1.4),
-            BossState::Dying => {
-                let k = (b.timer as f32 / 240.0).min(1.0);
-                e(1.0 + 3.0 * k, 1.0 + 3.0 * k, 1.0 + 3.0 * k)
-            }
-        };
     }
 }
 
@@ -277,7 +131,7 @@ fn attach_pendulum_visuals(
             ..default()
         });
         commands.entity(e).insert((
-            Mesh3d(meshes.add(Sphere::new(0.7))),
+            Mesh3d(meshes.add(crate::look::kits::bell(0.0, 0.7, 0.72, 0.0).to_mesh())),
             MeshMaterial3d(bob),
             Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
             Interpolated {
@@ -287,7 +141,7 @@ fn attach_pendulum_visuals(
         ));
         commands.spawn((
             Chain(e),
-            Mesh3d(meshes.add(Cuboid::new(0.16, 1.0, 0.16))),
+            Mesh3d(meshes.add(Cylinder::new(0.05, 1.0))),
             MeshMaterial3d(chain),
             Transform::default(),
         ));
@@ -447,25 +301,27 @@ fn update_boss_bar(
 fn exit_lock_tint(
     lock: Res<ArenaLock>,
     mut mats: ResMut<Assets<StandardMaterial>>,
-    q: Query<&MeshMaterial3d<StandardMaterial>, With<RoomExit>>,
+    veils: Query<&MeshMaterial3d<StandardMaterial>, With<ExitVeil>>,
+    mut lights: Query<&mut PointLight, With<ExitLight>>,
 ) {
-    let (base, glow) = if lock.0 {
+    let (tint, light) = if lock.0 {
         (
-            Color::srgba(1.0, 0.25, 0.2, 0.28),
-            LinearRgba::rgb(2.0, 0.2, 0.1),
+            Color::linear_rgb(2.2, 0.20, 0.12),
+            Color::srgb(1.0, 0.2, 0.15),
         )
     } else {
-        (
-            Color::srgba(0.6, 0.85, 1.0, 0.10),
-            LinearRgba::rgb(0.3, 0.6, 1.0),
-        )
+        (Color::WHITE, Color::srgb(0.55, 0.82, 1.0))
     };
-    for handle in &q {
-        if mats.get(&handle.0).is_some_and(|m| m.base_color != base) {
+    for handle in &veils {
+        if mats.get(&handle.0).is_some_and(|m| m.base_color != tint) {
             if let Some(m) = mats.get_mut(&handle.0) {
-                m.base_color = base;
-                m.emissive = glow;
+                m.base_color = tint;
             }
+        }
+    }
+    for mut l in &mut lights {
+        if l.color != light {
+            l.color = light;
         }
     }
 }

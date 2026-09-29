@@ -37,10 +37,7 @@ impl Plugin for WorldViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_fade)
             .add_systems(PostStartup, auto_start)
-            .add_systems(
-                Update,
-                (attach_props, update_fade, sandbox_respawn).after(RenderPrepSet),
-            );
+            .add_systems(Update, (update_fade, sandbox_respawn).after(RenderPrepSet));
     }
 }
 
@@ -104,56 +101,6 @@ fn begin(world: &mut World, room: &str, entry: &str, abilities: Abilities) {
     }
     if let Err(e) = enter_room(world, room, entry) {
         eprintln!("could not enter start room: {e}");
-    }
-}
-
-/// Exits, benches and pickups are simulation entities; give them a look.
-fn attach_props(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<StandardMaterial>>,
-    exits: Query<(Entity, &RoomExit, &hk_sim::components::SimPos), Added<RoomExit>>,
-    benches: Query<(Entity, &Bench, &hk_sim::components::SimPos), Added<Bench>>,
-    pickups: Query<(Entity, &Pickup, &hk_sim::components::SimPos), Added<Pickup>>,
-) {
-    for (e, x, pos) in &exits {
-        // A faint doorway glow so the way onward is visible.
-        let m = mats.add(StandardMaterial {
-            base_color: Color::srgba(0.6, 0.85, 1.0, 0.10),
-            emissive: LinearRgba::rgb(0.3, 0.6, 1.0),
-            alpha_mode: AlphaMode::Blend,
-            unlit: true,
-            ..default()
-        });
-        commands.entity(e).insert((
-            Mesh3d(meshes.add(Cuboid::new(x.half.x * 2.0, x.half.y * 2.0, 0.3))),
-            MeshMaterial3d(m),
-            Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
-        ));
-    }
-    for (e, b, pos) in &benches {
-        let m = mats.add(StandardMaterial {
-            base_color: Color::srgb(0.6, 0.5, 0.3),
-            emissive: LinearRgba::rgb(1.2, 0.8, 0.3),
-            ..default()
-        });
-        commands.entity(e).insert((
-            Mesh3d(meshes.add(Cuboid::new(b.half.x * 2.0, b.half.y * 1.2, 0.8))),
-            MeshMaterial3d(m),
-            Transform::from_xyz(pos.0.x, pos.0.y - b.half.y * 0.4, 0.0),
-        ));
-    }
-    for (e, p, pos) in &pickups {
-        let m = mats.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.9, 0.5),
-            emissive: LinearRgba::rgb(3.0, 2.4, 0.8),
-            ..default()
-        });
-        commands.entity(e).insert((
-            Mesh3d(meshes.add(Sphere::new(p.half.x * 0.7))),
-            MeshMaterial3d(m),
-            Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
-        ));
     }
 }
 

@@ -49,6 +49,8 @@ impl Plugin for EnemyModelsPlugin {
                 (
                     spawn_enemy_models,
                     animate_creatures,
+                    super::bosses::attach_boss_models,
+                    super::bosses::animate_bosses,
                     // Shards first: the ledger still remembers what died last frame.
                     spawn_shards,
                     record_ledger,
@@ -522,6 +524,8 @@ pub fn enemy_meshes() -> Vec<(&'static str, MeshData)> {
     shield_meshes(&mut out);
     spitter_meshes(&mut out);
     dummy_meshes(&mut out);
+    super::bosses::matron_meshes(&mut out);
+    super::bosses::warden_meshes(&mut out);
     out
 }
 
@@ -533,14 +537,35 @@ pub struct EnemyAssets {
     mats: HashMap<&'static str, Handle<StandardMaterial>>,
 }
 
+/// A list of named meshes (what the geometry builders return).
+pub type MeshList = Vec<(&'static str, MeshData)>;
+
+/// Adds named materials to the asset map (used by the boss module too).
+pub struct MatBuilder<'a> {
+    mats: &'a mut Assets<StandardMaterial>,
+    map: &'a mut HashMap<&'static str, Handle<StandardMaterial>>,
+}
+
+impl MatBuilder<'_> {
+    pub fn add(&mut self, k: &'static str, s: StandardMaterial) {
+        self.map.insert(k, self.mats.add(s));
+    }
+    pub fn lit(&mut self, k: &'static str, c: Color, rough: f32, metallic: f32) {
+        self.add(k, lit(c, rough, metallic));
+    }
+    pub fn glow(&mut self, k: &'static str, species: Species) {
+        self.add(k, glow_material(species));
+    }
+}
+
 impl EnemyAssets {
-    fn m(&self, k: &str) -> Handle<Mesh> {
+    pub(super) fn m(&self, k: &str) -> Handle<Mesh> {
         self.meshes
             .get(k)
             .unwrap_or_else(|| panic!("no enemy mesh `{k}`"))
             .clone()
     }
-    fn mat(&self, k: &str) -> Handle<StandardMaterial> {
+    pub(super) fn mat(&self, k: &str) -> Handle<StandardMaterial> {
         self.mats
             .get(k)
             .unwrap_or_else(|| panic!("no enemy material `{k}`"))
@@ -582,9 +607,10 @@ pub fn make_assets(meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial
         .map(|(k, d)| (k, meshes.add(d.to_mesh())))
         .collect();
     let mut m: HashMap<&'static str, Handle<StandardMaterial>> = HashMap::new();
-    let mut add = |k: &'static str, s: StandardMaterial| {
+    let mut add_std = |k: &'static str, s: StandardMaterial| {
         m.insert(k, mats.add(s));
     };
+    let mut add = |k: &'static str, s: StandardMaterial| add_std(k, s);
     // Husk.
     add("husk_shell", lit(Color::srgb(0.20, 0.13, 0.11), 0.92, 0.0));
     add("husk_glow", glow_material(Species::Husk));
@@ -669,6 +695,7 @@ pub fn make_assets(meshes: &mut Assets<Mesh>, mats: &mut Assets<StandardMaterial
     add("dummy_red", lit(Color::srgb(0.72, 0.16, 0.12), 0.8, 0.0));
     add("dummy_cream", lit(Color::srgb(0.93, 0.87, 0.72), 0.85, 0.0));
     add("dummy_dark", lit(Color::srgb(0.10, 0.07, 0.05), 0.9, 0.0));
+    super::bosses::boss_materials(&mut MatBuilder { mats, map: &mut m });
     EnemyAssets {
         meshes: mesh_map,
         mats: m,
@@ -750,6 +777,7 @@ pub fn spawn_creature(
         Species::Shieldbearer => ("shield_barrel", "shield_glow"),
         Species::Spitter => ("spitter_pod", "spitter_glow"),
         Species::Dummy => ("dummy_burlap", "husk_glow"),
+        Species::Matron | Species::Bellwarden => super::bosses::body_glow_keys(species),
     };
     let body = clone_mat(mats, &a.mat(body_key));
     let glow = clone_mat(mats, &a.mat(glow_key));
@@ -779,6 +807,8 @@ pub fn spawn_creature(
         Species::Shieldbearer => build_shield(commands, a, lean, &body, &glow),
         Species::Spitter => build_spitter(commands, a, lean, &body, &glow),
         Species::Dummy => build_dummy(commands, a, lean, &body),
+        Species::Matron => super::bosses::build_matron(commands, a, lean, &body, &glow),
+        Species::Bellwarden => super::bosses::build_warden(commands, a, lean, &body, &glow),
     };
     CreatureRig {
         species,
@@ -1238,6 +1268,8 @@ pub fn spawn_enemy_models(
             Without<Player>,
         ),
     >,
+    grid: Option<Res<hk_sim::world::grid::TileGrid>>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let Some(assets) = assets else {
         return;
@@ -1281,6 +1313,28 @@ pub fn spawn_enemy_models(
             Species::Dummy,
             aabb.half.y,
         );
+        // A dummy with no ground under it (a pogo target over a pit) hangs from
+        // a chain, so it never looks like it is floating.
+        let feet = pos.0.y - aabb.half.y;
+        let hanging = grid.as_ref().is_some_and(|g| {
+            let (i, j) = (pos.0.x.floor() as i32, (feet - 0.15).floor() as i32);
+            !matches!(
+                g.get(i, j),
+                hk_sim::world::grid::Tile::Solid | hk_sim::world::grid::Tile::OneWay
+            )
+        });
+        if hanging {
+            let chain = crate::look::kits::chain(0.0, 1.3, 60.0, 0.0);
+            let chain_e = commands
+                .spawn((
+                    Mesh3d(meshes.add(chain.to_mesh())),
+                    MeshMaterial3d(assets.mat("dummy_dark")),
+                    Transform::IDENTITY,
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(rig.lean).add_child(chain_e);
+        }
         commands.entity(e).insert((rig, CreatureAnim::new(1, 1.0)));
     }
 }
@@ -1327,14 +1381,17 @@ pub fn animate_creatures(
     tuning: Res<Tuning>,
     mut mats: ResMut<Assets<StandardMaterial>>,
     mut hits: MessageReader<Hit>,
-    mut creatures: Query<(
-        Entity,
-        Option<&Brain>,
-        Option<&Guard>,
-        &Velocity,
-        &CreatureRig,
-        &mut CreatureAnim,
-    )>,
+    mut creatures: Query<
+        (
+            Entity,
+            Option<&Brain>,
+            Option<&Guard>,
+            &Velocity,
+            &CreatureRig,
+            &mut CreatureAnim,
+        ),
+        Without<hk_sim::boss::BossBrain>,
+    >,
     mut transforms: Query<(&mut Transform, Option<&Rest>), Without<CreatureRig>>,
 ) {
     let dt = time.delta_secs().min(0.05);
@@ -1390,6 +1447,7 @@ pub fn animate_creatures(
             guard: anim.guard,
             hit: anim.hit,
             sway: anim.sway.x,
+            ..Default::default()
         };
         let pose = creature_pose(&input);
         let glow = if rig.species == Species::Dummy {
@@ -1524,7 +1582,7 @@ fn spawn_shards(
             Species::Wisp => "shard_wisp",
             Species::Shieldbearer => "shard_shield",
             Species::Spitter => "shard_spitter",
-            Species::Dummy => continue,
+            Species::Dummy | Species::Matron | Species::Bellwarden => continue,
         };
         for _ in 0..11 {
             let ang = rand() * std::f32::consts::TAU;

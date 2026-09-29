@@ -136,6 +136,7 @@ fn main() {
             models::knight::KnightPlugin,
             models::enemies::EnemyModelsPlugin,
             look::LookPlugin,
+            models::projectiles::ProjectilePlugin,
         ),
         boss_view::BossViewPlugin,
         toast::ToastPlugin,

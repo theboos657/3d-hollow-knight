@@ -27,6 +27,10 @@ pub enum Species {
     Shieldbearer,
     Spitter,
     Dummy,
+    /// The mid-boss: a hunched, mossy brute.
+    Matron,
+    /// The last boss: a bronze bell with a floating mask and chain arms.
+    Bellwarden,
 }
 
 impl From<hk_sim::enemy::EnemyKind> for Species {
@@ -79,10 +83,44 @@ pub mod spitter {
     pub const LEG_BACK: usize = 4;
 }
 
+pub mod matron {
+    pub const BODY: usize = 0;
+    pub const HEAD: usize = 1;
+    pub const ARM_FRONT: usize = 2;
+    pub const ARM_BACK: usize = 3;
+    pub const LEG_FRONT: usize = 4;
+    pub const LEG_BACK: usize = 5;
+    pub const JAR: usize = 6;
+}
+
+pub mod warden {
+    pub const BODY: usize = 0;
+    pub const MASK: usize = 1;
+    pub const ARM_FRONT: usize = 2;
+    pub const ARM_BACK: usize = 3;
+    pub const LEG_FRONT: usize = 4;
+    pub const LEG_BACK: usize = 5;
+    /// Glowing cracks: hidden in the first phase, spreading after.
+    pub const CRACKS: usize = 6;
+}
+
 pub mod dummy {
     pub const POST: usize = 0;
     pub const HEAD: usize = 1;
     pub const ARMS: usize = 2;
+}
+
+/// Which attack a boss is telegraphing or performing (the poses differ).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum BossAtk {
+    #[default]
+    None,
+    Slam,
+    Charge,
+    Bells,
+    Sweep,
+    Pendulums,
+    Toll,
 }
 
 /// What a creature is doing this frame.
@@ -109,6 +147,16 @@ pub struct CreatureIn {
     pub hit: f32,
     /// The dummy's sway angle.
     pub sway: f32,
+    /// Bosses: the attack in progress, the phase (1-based), whether the second
+    /// arc of a sweep is winding up, whether it is off the ground, whether it
+    /// just hit a wall, whether it is asleep, and how far into dying (0..1).
+    pub atk: BossAtk,
+    pub phase: u8,
+    pub second: bool,
+    pub airborne: bool,
+    pub wall: bool,
+    pub sleeping: bool,
+    pub dying: f32,
 }
 
 impl Default for CreatureIn {
@@ -126,6 +174,13 @@ impl Default for CreatureIn {
             guard: 1.0,
             hit: 0.0,
             sway: 0.0,
+            atk: BossAtk::None,
+            phase: 1,
+            second: false,
+            airborne: false,
+            wall: false,
+            sleeping: false,
+            dying: 0.0,
         }
     }
 }
@@ -182,9 +237,14 @@ pub fn creature_pose(i: &CreatureIn) -> CreaturePose {
         Species::Shieldbearer => shield_pose(i),
         Species::Spitter => spitter_pose(i),
         Species::Dummy => dummy_pose(i),
+        Species::Matron => matron_pose(i),
+        Species::Bellwarden => warden_pose(i),
     };
     // A fresh hit always kicks the body back a little, whatever it is doing.
-    if i.species != Species::Dummy && i.species != Species::Wisp {
+    if !matches!(
+        i.species,
+        Species::Dummy | Species::Wisp | Species::Matron | Species::Bellwarden
+    ) {
         p.lean -= 0.22 * i.hit;
         p.squash[0] += 0.06 * i.hit;
         p.squash[1] -= 0.06 * i.hit;
@@ -509,6 +569,315 @@ fn spitter_pose(i: &CreatureIn) -> CreaturePose {
     p
 }
 
+// ------------------------------------------------------------------ bosses --
+
+/// Sinusoidal shake used for roars and rings.
+fn tremor(clock: f32, hz: f32, amp: f32) -> f32 {
+    (clock * hz * TAU_F).sin() * amp
+}
+
+const TAU_F: f32 = std::f32::consts::TAU;
+
+fn matron_pose(i: &CreatureIn) -> CreaturePose {
+    use matron::*;
+    use EnemyState::*;
+    let mut p = CreaturePose::rest();
+    let (c, pr) = (i.clock, progress(i));
+    let breathe = (c * 1.8).sin();
+    p.joints[BODY] = JointXf::at(0.0, 0.02 * breathe);
+    p.joints[HEAD] = JointXf::rot(0.04 * (c * 1.1).sin());
+    p.joints[ARM_FRONT] = JointXf::rot(0.22 + 0.03 * breathe);
+    p.joints[ARM_BACK] = JointXf::rot(0.10 - 0.03 * breathe);
+    p.joints[JAR] = JointXf::rot(0.12 * (c * 2.0).sin());
+    let s = i.walk.sin();
+    let walking = i.vx.abs() > 0.3;
+    if i.sleeping {
+        // Curled up like a boulder, breathing slowly.
+        p.drop = -0.30;
+        p.lean = 0.42;
+        p.joints[HEAD] = JointXf::rot(-0.55 + 0.03 * breathe);
+        p.joints[ARM_FRONT] = JointXf::rot(0.9);
+        p.joints[ARM_BACK] = JointXf::rot(0.7);
+        p.squash = [1.05, 0.93 + 0.01 * breathe];
+        return p;
+    }
+    if i.dying > 0.0 {
+        let k = i.dying.clamp(0.0, 1.0);
+        p.drop = -0.95 * k;
+        p.lean = 0.75 * k;
+        p.joints[HEAD] = JointXf::rot(-0.9 * k);
+        p.joints[ARM_FRONT] = JointXf::rot(0.2 - 0.6 * k);
+        p.joints[ARM_BACK] = JointXf::rot(0.1 - 0.4 * k);
+        p.squash = [1.0 + 0.10 * k, 1.0 - 0.30 * k];
+        p.joints[BODY] = JointXf::at(tremor(c, 9.0, 0.04 * (1.0 - k)), 0.0);
+        return p;
+    }
+    let boss_state = i.state;
+    match boss_state {
+        Notice | Stagger => {
+            // The roar: reared up, arms flung wide, the whole body shaking.
+            p.lean = -0.38;
+            p.joints[HEAD] = JointXf::rot(0.75);
+            p.joints[ARM_FRONT] = JointXf::rot(2.1);
+            p.joints[ARM_BACK] = JointXf::rot(1.8);
+            p.joints[BODY] = JointXf::at(tremor(c, 9.0, 0.04), 0.0);
+            p.squash = [1.0 + 0.05 * (c * 40.0).sin(), 1.0 - 0.04 * (c * 40.0).sin()];
+        }
+        Idle | Chase => {
+            if walking {
+                p.joints[LEG_FRONT] = JointXf::rot(0.55 * s);
+                p.joints[LEG_BACK] = JointXf::rot(-0.55 * s);
+                p.joints[ARM_FRONT] = JointXf::rot(0.3 - 0.4 * s);
+                p.joints[ARM_BACK] = JointXf::rot(0.15 + 0.4 * s);
+                // Heavy: the whole body dips on every step.
+                p.joints[BODY] = JointXf::at(0.0, -0.07 * (i.walk * 2.0).cos().abs());
+            }
+            p.lean = 0.16;
+        }
+        Windup => {
+            // The tell: what it is about to do, shown with the whole body.
+            let e = ease_in_out(pr);
+            match i.atk {
+                BossAtk::Charge => {
+                    p.drop = -0.30 * e;
+                    p.lean = 0.30 * e;
+                    p.joints[HEAD] = JointXf::rot(-0.4 * e);
+                    // Pawing the ground.
+                    p.joints[ARM_FRONT] = JointXf::rot(-0.5 * e + 0.55 * (c * 26.0).sin() * e);
+                    p.joints[ARM_BACK] = JointXf::rot(0.3 * e);
+                    p.squash = [1.0 + 0.06 * e, 1.0 - 0.08 * e];
+                }
+                _ => {
+                    // Crouch, arms overhead: something heavy is coming down.
+                    p.drop = -0.50 * e;
+                    p.lean = -0.25 * e;
+                    p.joints[ARM_FRONT] = JointXf::rot(lerp(0.22, 2.7, e));
+                    p.joints[ARM_BACK] = JointXf::rot(lerp(0.10, 2.5, e));
+                    p.joints[LEG_FRONT] = JointXf::rot(0.5 * e);
+                    p.joints[LEG_BACK] = JointXf::rot(-0.4 * e);
+                    p.joints[HEAD] = JointXf::rot(0.3 * e);
+                    p.squash = [1.0 + 0.10 * e, 1.0 - 0.14 * e];
+                    p.joints[BODY] = JointXf::at(tremor(c, 12.0, 0.02 * e), 0.0);
+                }
+            }
+        }
+        Attack => match i.atk {
+            BossAtk::Charge => {
+                p.lean = 0.75;
+                p.drop = -0.15;
+                p.joints[HEAD] = JointXf::rot(-0.5);
+                p.joints[ARM_FRONT] = JointXf::rot(-1.0);
+                p.joints[ARM_BACK] = JointXf::rot(-1.2);
+                p.joints[LEG_FRONT] = JointXf::rot(0.9 * s);
+                p.joints[LEG_BACK] = JointXf::rot(-0.9 * s);
+                p.squash = [0.92, 1.06];
+            }
+            _ if i.airborne => {
+                p.lean = 0.10;
+                p.joints[ARM_FRONT] = JointXf::rot(2.9);
+                p.joints[ARM_BACK] = JointXf::rot(2.7);
+                p.joints[LEG_FRONT] = JointXf::rot(0.8);
+                p.joints[LEG_BACK] = JointXf::rot(0.6);
+                p.squash = [0.92, 1.12];
+            }
+            _ => {
+                // The slam: fists driven into the floor, the whole body squashed.
+                p.lean = 0.45;
+                p.drop = -0.25;
+                p.joints[ARM_FRONT] = JointXf::rot(0.3);
+                p.joints[ARM_BACK] = JointXf::rot(0.2);
+                p.joints[HEAD] = JointXf::rot(-0.3);
+                p.squash = [1.18, 0.82];
+            }
+        },
+        Recover => {
+            let e = 1.0 - ease_out_cubic(pr);
+            if i.wall {
+                // Stunned against the wall: dazed, swaying.
+                p.lean = -0.35;
+                p.joints[HEAD] = JointXf::rot(-0.3 + 0.25 * (c * 9.0).sin());
+                p.joints[ARM_FRONT] = JointXf::rot(-0.4);
+                p.squash = [1.06, 0.94];
+            } else {
+                p.lean = 0.30 * e;
+                p.drop = -0.20 * e;
+                p.joints[HEAD] = JointXf::rot(-0.6 * e);
+                p.joints[ARM_FRONT] = JointXf::rot(lerp(0.22, 0.0, e));
+                p.squash = [1.0 + 0.04 * e, 1.0 - 0.04 * e];
+            }
+        }
+    }
+    p
+}
+
+fn warden_pose(i: &CreatureIn) -> CreaturePose {
+    use warden::*;
+    use EnemyState::*;
+    let mut p = CreaturePose::rest();
+    let (c, pr) = (i.clock, progress(i));
+    let breathe = (c * 1.5).sin();
+    // The mask floats and bobs above the bell; the bell hangs still.
+    p.joints[MASK] = JointXf::at(0.0, 0.06 * (c * 1.7).sin());
+    p.joints[ARM_FRONT] = JointXf::rot(0.15 + 0.06 * (c * 1.3).sin());
+    p.joints[ARM_BACK] = JointXf::rot(0.08 + 0.06 * (c * 1.3 + 1.0).sin());
+    p.joints[BODY] = JointXf::rot(0.012 * breathe);
+    // Cracks spread with the phase.
+    let crack = match i.phase {
+        0 | 1 => 0.001,
+        2 => 1.0,
+        _ => 1.15,
+    };
+    p.joints[CRACKS].scale = [crack; 3];
+    let s = i.walk.sin();
+    let walking = i.vx.abs() > 0.3;
+    if i.sleeping {
+        // A dormant bell on the floor: the mask sunk inside, the chains coiled.
+        p.drop = -0.20;
+        p.joints[MASK] = JointXf::at(0.0, -1.05);
+        p.joints[ARM_FRONT] = JointXf::rot(0.05);
+        p.joints[ARM_BACK] = JointXf::rot(0.0);
+        p.squash = [1.0, 0.97];
+        return p;
+    }
+    if i.dying > 0.0 {
+        let k = i.dying.clamp(0.0, 1.0);
+        p.drop = -0.6 * k;
+        p.joints[BODY] = JointXf::rot(0.5 * k + tremor(c, 11.0, 0.03 * (1.0 - k)));
+        p.joints[MASK] = JointXf::at(0.25 * k, -1.7 * k);
+        p.joints[ARM_FRONT] = JointXf::rot(0.15 + 0.8 * k);
+        p.joints[ARM_BACK] = JointXf::rot(0.08 - 0.5 * k);
+        p.squash = [1.0 + 0.06 * k, 1.0 - 0.10 * k];
+        return p;
+    }
+    match i.state {
+        Notice | Stagger => {
+            // Rises, mask high, arms spread, the whole bell ringing.
+            p.drop = 0.10;
+            p.joints[MASK] = JointXf::at(0.0, 0.35 + 0.05 * (c * 4.0).sin());
+            p.joints[ARM_FRONT] = JointXf::rot(1.9);
+            p.joints[ARM_BACK] = JointXf::rot(1.7);
+            p.joints[BODY] = JointXf::rot(tremor(c, 10.0, 0.05));
+            p.squash = [1.0 + 0.03 * (c * 30.0).sin(), 1.0];
+        }
+        Idle | Chase => {
+            if walking {
+                // The bell rocks from side to side on its little feet.
+                p.joints[BODY] = JointXf::rot(0.07 * s);
+                p.joints[LEG_FRONT] = JointXf::rot(0.5 * s);
+                p.joints[LEG_BACK] = JointXf::rot(-0.5 * s);
+                p.joints[ARM_FRONT] = JointXf::rot(0.3 - 0.35 * s);
+                p.joints[ARM_BACK] = JointXf::rot(0.18 + 0.35 * s);
+                p.drop = -0.05 * (i.walk * 2.0).cos().abs();
+            }
+            p.lean = 0.06;
+        }
+        Windup => {
+            let e = ease_in_out(pr);
+            match i.atk {
+                BossAtk::Sweep => {
+                    // Draws the arm back; the second arc is the other arm.
+                    let (a, b) = if i.second { (0.6, -1.8) } else { (-1.8, 0.4) };
+                    p.joints[ARM_FRONT] = JointXf::rot(lerp(0.15, a, e));
+                    p.joints[ARM_BACK] = JointXf::rot(lerp(0.08, b, e));
+                    p.lean = -0.12 * e;
+                    p.drop = -0.10 * e;
+                }
+                BossAtk::Toll => {
+                    // The bell swings on its axis, building up to a ring.
+                    p.joints[BODY] = JointXf::rot(0.16 * e * (c * 14.0).sin());
+                    p.joints[ARM_FRONT] = JointXf::rot(lerp(0.15, 1.3, e));
+                    p.joints[ARM_BACK] = JointXf::rot(lerp(0.08, 1.2, e));
+                    p.joints[MASK] = JointXf::at(0.0, 0.2 * e);
+                }
+                BossAtk::Charge => {
+                    p.drop = -0.30 * e;
+                    p.lean = 0.35 * e;
+                    p.joints[ARM_FRONT] = JointXf::rot(lerp(0.15, -1.2, e));
+                    p.joints[ARM_BACK] = JointXf::rot(lerp(0.08, -1.0, e));
+                    p.joints[BODY] = JointXf::rot(tremor(c, 14.0, 0.02 * e));
+                }
+                _ => {
+                    // Slam, bells, pendulums: hoists its chains up and back.
+                    p.drop = -0.30 * e;
+                    p.joints[ARM_FRONT] = JointXf::rot(lerp(0.15, 2.8, e));
+                    p.joints[ARM_BACK] = JointXf::rot(lerp(0.08, 2.6, e));
+                    p.joints[MASK] = JointXf::at(0.0, 0.3 * e);
+                    p.joints[BODY] = JointXf::rot(tremor(c, 12.0, 0.02 * e));
+                    p.squash = [1.0 + 0.06 * e, 1.0 - 0.08 * e];
+                }
+            }
+        }
+        Attack => match i.atk {
+            BossAtk::Sweep => {
+                // Whips the chain-fist across in front of it.
+                let a = lerp(-1.8, 1.7, ease_out_cubic(pr * 1.5));
+                if i.second {
+                    p.joints[ARM_BACK] = JointXf::rot(a);
+                    p.joints[ARM_FRONT] = JointXf::rot(0.6);
+                } else {
+                    p.joints[ARM_FRONT] = JointXf::rot(a);
+                    p.joints[ARM_BACK] = JointXf::rot(0.4);
+                }
+                p.lean = 0.25;
+            }
+            BossAtk::Toll => {
+                // The ringing: the whole bell throws itself from side to side.
+                p.joints[BODY] = JointXf::rot(0.22 * (c * 16.0).sin());
+                p.joints[ARM_FRONT] = JointXf::rot(1.4 + 0.25 * (c * 16.0).sin());
+                p.joints[ARM_BACK] = JointXf::rot(1.3 - 0.25 * (c * 16.0).sin());
+                p.squash = [1.0 + 0.05 * (c * 32.0).sin().abs(), 1.0];
+            }
+            BossAtk::Charge => {
+                p.lean = 0.55;
+                p.drop = -0.10;
+                p.joints[ARM_FRONT] = JointXf::rot(-1.3);
+                p.joints[ARM_BACK] = JointXf::rot(-1.1);
+                p.joints[LEG_FRONT] = JointXf::rot(0.8 * s);
+                p.joints[LEG_BACK] = JointXf::rot(-0.8 * s);
+                p.squash = [0.92, 1.05];
+            }
+            _ if i.airborne => {
+                p.lean = 0.05;
+                p.joints[ARM_FRONT] = JointXf::rot(2.9);
+                p.joints[ARM_BACK] = JointXf::rot(2.7);
+                p.joints[MASK] = JointXf::at(0.0, 0.3);
+                p.squash = [0.94, 1.10];
+            }
+            BossAtk::Slam => {
+                // Slammed down: the chain-fists in the floor, the bell squashed.
+                p.joints[ARM_FRONT] = JointXf::rot(0.25);
+                p.joints[ARM_BACK] = JointXf::rot(0.15);
+                p.drop = -0.20;
+                p.squash = [1.14, 0.86];
+            }
+            _ => {
+                // Bells and pendulums: chains flung up to the ceiling.
+                p.joints[ARM_FRONT] = JointXf::rot(2.9 + 0.2 * (c * 12.0).sin());
+                p.joints[ARM_BACK] = JointXf::rot(2.7 - 0.2 * (c * 12.0).sin());
+                p.joints[MASK] = JointXf::at(0.0, 0.35);
+            }
+        },
+        Recover => {
+            let e = 1.0 - ease_out_cubic(pr);
+            if i.wall {
+                p.lean = -0.30;
+                p.joints[BODY] = JointXf::rot(-0.10 + 0.05 * (c * 8.0).sin());
+                p.joints[MASK] = JointXf::at(-0.1, -0.35);
+                p.squash = [1.05, 0.94];
+            } else {
+                // The bell sags and the mask sinks toward it: the punish window.
+                p.drop = -0.14 * e;
+                p.joints[MASK] = JointXf::at(0.0, -0.45 * e);
+                p.joints[ARM_FRONT] = JointXf::rot(lerp(0.15, 0.0, e));
+                p.joints[ARM_BACK] = JointXf::rot(lerp(0.08, -0.05, e));
+                p.joints[BODY] = JointXf::rot(0.06 * e * (c * 6.0).sin());
+                p.squash = [1.0 + 0.03 * e, 1.0 - 0.03 * e];
+            }
+        }
+    }
+    p
+}
+
 // -------------------------------------------------------------------- dummy --
 
 fn dummy_pose(i: &CreatureIn) -> CreaturePose {
@@ -562,6 +931,8 @@ pub fn species_glow(species: Species) -> [f32; 3] {
         Species::Shieldbearer => [0.08, 0.30, 0.34],
         Species::Spitter => [0.14, 0.34, 0.06],
         Species::Dummy => [0.0, 0.0, 0.0],
+        Species::Matron => [0.32, 0.78, 0.12],
+        Species::Bellwarden => [0.95, 0.48, 0.10],
     }
 }
 

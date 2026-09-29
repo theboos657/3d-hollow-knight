@@ -24,7 +24,7 @@ impl Plugin for VisualsPlugin {
             .add_systems(PostStartup, spawn_hud)
             .add_systems(
                 Update,
-                (attach_body_visuals, attach_hit_visuals, room_banner).after(RenderPrepSet),
+                (attach_body_visuals, room_banner).after(RenderPrepSet),
             );
     }
 }
@@ -39,7 +39,7 @@ fn attach_body_visuals(
     mut meshes: ResMut<Assets<Mesh>>,
     pal: Res<Palette>,
     q: Query<
-        (Entity, &Hurtbox, Option<&Aabb>, &SimPos),
+        (Entity, &Hurtbox, Option<&Aabb>, &SimPos, Option<&Hitbox>),
         (
             Added<Hurtbox>,
             Without<Boss>,
@@ -48,7 +48,11 @@ fn attach_body_visuals(
         ),
     >,
 ) {
-    for (e, hu, aabb, pos) in &q {
+    for (e, hu, aabb, pos, hitbox) in &q {
+        // Spikes are crystals (`look::fixtures`).
+        if hitbox.is_some_and(|h| h.kind == HitKind::Hazard) {
+            continue;
+        }
         let mat = match hu.team {
             Team::Enemy => continue,
             Team::Player => &pal.marker,
@@ -61,35 +65,6 @@ fn attach_body_visuals(
             Transform::from_xyz(pos.0.x, pos.0.y, 0.0),
             Interpolated {
                 z: 0.0,
-                offset: Vec2::ZERO,
-            },
-        ));
-    }
-}
-
-/// Slash boxes and projectiles are drawn as translucent boxes.
-fn attach_hit_visuals(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    pal: Res<Palette>,
-    show: Res<ShowHitboxes>,
-    q: Query<(Entity, &Hitbox, &SimPos), (Added<Hitbox>, Without<Hurtbox>)>,
-) {
-    for (e, hb, pos) in &q {
-        if hb.team == Team::Player && hb.kind == HitKind::Nail && !show.0 {
-            continue;
-        }
-        let mat = match hb.kind {
-            HitKind::Spell => &pal.bolt,
-            HitKind::Projectile => &pal.hazard,
-            _ => &pal.slash,
-        };
-        commands.entity(e).insert((
-            Mesh3d(meshes.add(Cuboid::new(hb.half.x * 2.0, hb.half.y * 2.0, 0.6))),
-            MeshMaterial3d(mat.clone()),
-            Transform::from_xyz(pos.0.x, pos.0.y, 0.4),
-            Interpolated {
-                z: 0.4,
                 offset: Vec2::ZERO,
             },
         ));

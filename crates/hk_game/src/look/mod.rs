@@ -2,6 +2,7 @@
 //! that falls on it and the fires in it. Everything here reads the simulation's
 //! room and never feeds back into it.
 
+pub mod fixtures;
 pub mod kits;
 pub mod level;
 pub mod props;
@@ -31,7 +32,14 @@ impl Plugin for LookPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (room::rebuild_room, props::flicker).after(RenderPrepSet),
+            (
+                room::rebuild_room,
+                props::flicker,
+                fixtures::attach_fixtures,
+                fixtures::attach_spikes,
+                fixtures::animate_fixtures,
+            )
+                .after(RenderPrepSet),
         );
     }
 }
